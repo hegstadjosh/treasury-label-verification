@@ -285,6 +285,14 @@ Batch state lives entirely in the browser. Reload = batch lost. Drill-down is a 
 
 Anyone with the URL can POST images and get extraction results. Acceptable for a prototype; would be the first thing to add for production.
 
+### No upload size limits
+
+Neither the client nor the server enforces a per-file or per-batch byte cap. Adversarial 100 MB uploads will land on the function and waste memory. For a stakeholder demo this is fine; for any public deployment, the first hardening pass would add a 10 MB per-file client check and a server-side multipart size guard.
+
+### Vercel body limit on very large batches
+
+Vercel's serverless function default body limit is ~4.5 MB. Sarah Chen's interview describes peak-season dumps of 200–300 label applications at once; at typical phone-photo sizes (~1–4 MB per JPG) that exceeds the body limit in a single request. The current batch UI works around this with **client-side chunking** — it sends the batch to `/api/analyze-batch` in chunks of 8 labels per request, merges results client-side, and surfaces incremental progress. That's good enough for the prototype's expected demo loads and is documented inline in `src/app/page.tsx`. A production version would either bump the body limit, switch to direct S3 / Azure Blob uploads with signed URLs and pull-by-reference extraction, or use a chunked-upload protocol.
+
 ### TTB COLA integration is out of scope
 
 The take-home brief is explicit that this is **a standalone proof-of-concept**, not a COLA integration. There's no application-ID lookup, no FedRAMP-anything, no procurement plumbing. This is "could this approach work" code, not "could this ship into production today" code.

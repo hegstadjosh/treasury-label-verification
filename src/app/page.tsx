@@ -33,9 +33,32 @@ const EMPTY_RESPONSE: BatchAnalyzeResponse = {
 
 type Status =
   | { kind: "idle" }
-  | { kind: "loading" }
-  | { kind: "error"; message: string }
+  | { kind: "loading"; processed: number; total: number; partial: BatchAnalyzeResponse }
+  | { kind: "error"; message: string; partial: BatchAnalyzeResponse }
   | { kind: "done"; response: BatchAnalyzeResponse };
+
+/**
+ * Batch chunking constants.
+ *
+ * Vercel serverless functions cap the request body at ~4.5 MB by default; the
+ * stakeholder use case (200-300 labels per dump, ~1-4 MB per photo) is well
+ * over that. Splitting the upload into chunks both side-steps the platform
+ * limit and gives the reviewer per-chunk progress feedback — at 8 labels per
+ * chunk, the queue populates roughly every Gemini round-trip (~8 s) instead
+ * of staring at a static spinner for minutes.
+ *
+ * Chunk size deliberately matches the server's `BATCH_CONCURRENCY` so each
+ * chunk fits inside a single server-side fan-out pass.
+ */
+const CLIENT_CHUNK_SIZE = 8;
+
+const EMPTY_SUMMARY = {
+  total: 0,
+  pass: 0,
+  needs_review: 0,
+  fail: 0,
+  unreadable: 0,
+};
 
 export default function Home() {
   const [files, setFiles] = useState<UploadedFile[]>([]);
@@ -54,7 +77,11 @@ export default function Home() {
   const canAnalyze = files.length > 0 && hasAnyExpected && !busy;
 
   const response: BatchAnalyzeResponse =
-    status.kind === "done" ? status.response : EMPTY_RESPONSE;
+    status.kind === "done"
+      ? status.response
+      : status.kind === "loading" || status.kind === "error"
+        ? status.partial
+        : EMPTY_RESPONSE;
 
   // Keep the selected entry's reference fresh when results change.
   const selectedFromResponse = useMemo(() => {
@@ -64,45 +91,87 @@ export default function Home() {
 
   async function analyze() {
     if (files.length === 0 || !hasAnyExpected) return;
-    setStatus({ kind: "loading" });
     setSelected(null);
+    setFilter(null);
 
-    try {
+    const total = files.length;
+    let merged: BatchLabelEntry[] = [];
+    let summary = { ...EMPTY_SUMMARY };
+
+    startTransition(() => {
+      setStatus({
+        kind: "loading",
+        processed: 0,
+        total,
+        partial: { labels: [], summary: { ...summary, total: 0 } },
+      });
+    });
+
+    for (let offset = 0; offset < total; offset += CLIENT_CHUNK_SIZE) {
+      const chunk = files.slice(offset, offset + CLIENT_CHUNK_SIZE);
       const form = new FormData();
-      for (const { file } of files) {
-        form.append("image", file);
-      }
+      for (const { file } of chunk) form.append("image", file);
       form.append("expected", JSON.stringify(expected));
 
-      const res = await fetch("/api/analyze-batch", {
-        method: "POST",
-        body: form,
-      });
-
-      if (!res.ok) {
-        let message = `Analyze failed (${res.status})`;
-        try {
-          const data = (await res.json()) as { error?: string };
-          if (data?.error) message = data.error;
-        } catch {
-          // ignore JSON parse errors
+      let body: BatchAnalyzeResponse;
+      try {
+        const res = await fetch("/api/analyze-batch", {
+          method: "POST",
+          body: form,
+        });
+        if (!res.ok) {
+          let message = `Analyze failed (${res.status})`;
+          try {
+            const data = (await res.json()) as { error?: string };
+            if (data?.error) message = data.error;
+          } catch {
+            // ignore JSON parse errors
+          }
+          setStatus({
+            kind: "error",
+            message,
+            partial: { labels: merged, summary: { ...summary, total: merged.length } },
+          });
+          return;
         }
-        setStatus({ kind: "error", message });
+        body = (await res.json()) as BatchAnalyzeResponse;
+      } catch (err) {
+        setStatus({
+          kind: "error",
+          message:
+            err instanceof Error
+              ? err.message
+              : "Network error while contacting /api/analyze-batch.",
+          partial: { labels: merged, summary: { ...summary, total: merged.length } },
+        });
         return;
       }
 
-      const body = (await res.json()) as BatchAnalyzeResponse;
+      // Re-id chunk results to use the upload-order global index so React keys
+      // stay stable across chunks and the queue renders in upload order.
+      const reindexed = body.labels.map((entry, idx) => ({
+        ...entry,
+        id: `${offset + idx}-${entry.filename}`,
+      }));
+      merged = [...merged, ...reindexed];
+      summary = {
+        total: merged.length,
+        pass: summary.pass + body.summary.pass,
+        needs_review: summary.needs_review + body.summary.needs_review,
+        fail: summary.fail + body.summary.fail,
+        unreadable: summary.unreadable + body.summary.unreadable,
+      };
+
+      const processed = Math.min(offset + chunk.length, total);
+      const partial: BatchAnalyzeResponse = { labels: merged, summary };
+      const isFinal = processed >= total;
+
       startTransition(() => {
-        setStatus({ kind: "done", response: body });
-        setFilter(null);
-      });
-    } catch (err) {
-      setStatus({
-        kind: "error",
-        message:
-          err instanceof Error
-            ? err.message
-            : "Network error while contacting /api/analyze-batch.",
+        if (isFinal) {
+          setStatus({ kind: "done", response: partial });
+        } else {
+          setStatus({ kind: "loading", processed, total, partial });
+        }
       });
     }
   }
@@ -115,7 +184,9 @@ export default function Home() {
     setSelected(null);
   }
 
-  const hasResults = status.kind === "done" && response.labels.length > 0;
+  const hasResults =
+    (status.kind === "done" || status.kind === "loading" || status.kind === "error") &&
+    response.labels.length > 0;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -179,9 +250,11 @@ export default function Home() {
               ? "Add at least one image to begin."
               : !hasAnyExpected
                 ? "Enter at least one declared field to enable analysis."
-                : busy
-                  ? `Analyzing ${files.length} label${files.length === 1 ? "" : "s"}…`
-                  : `Ready to analyze ${files.length} label${files.length === 1 ? "" : "s"}.`}
+                : status.kind === "loading"
+                  ? `Analyzed ${status.processed} of ${status.total} label${status.total === 1 ? "" : "s"}…`
+                  : busy
+                    ? `Analyzing ${files.length} label${files.length === 1 ? "" : "s"}…`
+                    : `Ready to analyze ${files.length} label${files.length === 1 ? "" : "s"}.`}
           </div>
           <div className="flex items-center gap-3">
             <button
