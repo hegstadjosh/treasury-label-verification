@@ -20,26 +20,100 @@ interface AnalyzeChunksOptions {
   startTransition: StartTransition;
 }
 
+/**
+ * Cap on how many client-side chunk requests are in flight at once.
+ *
+ * Each chunk maps to one POST to /api/analyze-batch, which itself fans out
+ * up to BATCH_CONCURRENCY (8) extractor calls. So the maximum live
+ * extractor calls = CLIENT_PARALLELISM × server cap. For 25 labels this
+ * means ~32 concurrent Gemini calls — well within per-project QPS, but if
+ * batches scale to 100+ labels we'd want to lower this or add a token
+ * bucket. For prototype loads, parallel is just faster.
+ */
+const CLIENT_PARALLELISM = 4;
+
+/**
+ * Fire all chunks in parallel (bounded by CLIENT_PARALLELISM), surface
+ * results to the UI as each chunk lands. Order in the queue is preserved
+ * via the precomputed per-chunk offsets — when chunk K returns we splice
+ * its results into the right slot, even if earlier chunks haven't returned
+ * yet, so the table fills in as data arrives rather than waiting for a
+ * strict in-order completion.
+ */
 export async function analyzeChunks(opts: AnalyzeChunksOptions) {
-  let merged: BatchLabelEntry[] = [];
-  let summary = { ...EMPTY_SUMMARY };
+  const chunks = uploadChunks(opts.files);
   const total = opts.files.length;
+
+  // Precompute each chunk's starting offset so reindex can run independently
+  // of completion order.
+  const offsets: number[] = [];
+  let runningOffset = 0;
+  for (const chunk of chunks) {
+    offsets.push(runningOffset);
+    runningOffset += chunk.length;
+  }
+
+  const chunkResults: (BatchAnalyzeResponse | null)[] = new Array(chunks.length).fill(null);
+  let firstError: string | null = null;
 
   opts.startTransition(() => {
     opts.setStatus({ kind: "loading", processed: 0, total, partial: EMPTY_RESPONSE });
   });
 
-  let processed = 0;
-  for (const chunk of uploadChunks(opts.files)) {
-    const batch = await postBatch(chunk, opts);
-    if ("error" in batch) {
-      opts.setStatus({ kind: "error", message: batch.error, partial: { labels: merged, summary } });
-      return;
+  const publishCurrent = () => {
+    const merged: BatchLabelEntry[] = [];
+    let summary = { ...EMPTY_SUMMARY };
+    let processed = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      const r = chunkResults[i];
+      if (!r) continue;
+      merged.push(...reindex(r.labels, offsets[i]));
+      summary = mergeSummary(summary, r.summary, merged.length);
+      processed += chunks[i].length;
     }
-    merged = [...merged, ...reindex(batch.labels, processed)];
-    processed += chunk.length;
-    summary = mergeSummary(summary, batch.summary, merged.length);
     publishProgress(opts, merged, summary, processed, total);
+  };
+
+  // Bounded parallelism — keep at most CLIENT_PARALLELISM chunks in flight
+  // at once. For our typical batch sizes this is effectively "all at once,"
+  // but the cap prevents 100-label runs from blowing past Gemini QPS.
+  const queue = chunks.map((chunk, i) => ({ chunk, i }));
+  async function worker() {
+    while (queue.length > 0) {
+      const next = queue.shift();
+      if (!next) return;
+      const batch = await postBatch(next.chunk, opts);
+      if ("error" in batch) {
+        if (firstError === null) firstError = batch.error;
+        continue;
+      }
+      chunkResults[next.i] = batch;
+      publishCurrent();
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(CLIENT_PARALLELISM, chunks.length) },
+    worker,
+  );
+  await Promise.all(workers);
+
+  if (firstError !== null) {
+    // Surface error, but keep whatever chunks DID succeed visible so the
+    // reviewer can see partial progress rather than losing everything.
+    const merged: BatchLabelEntry[] = [];
+    let summary = { ...EMPTY_SUMMARY };
+    for (let i = 0; i < chunks.length; i++) {
+      const r = chunkResults[i];
+      if (!r) continue;
+      merged.push(...reindex(r.labels, offsets[i]));
+      summary = mergeSummary(summary, r.summary, merged.length);
+    }
+    opts.setStatus({
+      kind: "error",
+      message: firstError,
+      partial: { labels: merged, summary },
+    });
   }
 }
 
