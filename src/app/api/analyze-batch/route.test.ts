@@ -159,6 +159,125 @@ describe("POST /api/analyze-batch — validation errors", () => {
   });
 });
 
+describe("POST /api/analyze-batch — per-filename expected (multi-product batches)", () => {
+  /**
+   * `expectedByFilename` is the realistic batch flow: each label in the
+   * batch is a different product (importer dumps 200 applications at once),
+   * so each image needs its OWN expected fields. Keyed by filename,
+   * case-insensitive to match how real importer spreadsheets land.
+   */
+
+  function buildPerFilenameRequest(
+    filenames: string[],
+    expectedByFilename: Record<string, ExpectedLabel> | string,
+  ): Request {
+    const form = new FormData();
+    for (const name of filenames) {
+      form.append("image", new File([new Uint8Array([0])], name, { type: "image/png" }));
+    }
+    form.set(
+      "expectedByFilename",
+      typeof expectedByFilename === "string"
+        ? expectedByFilename
+        : JSON.stringify(expectedByFilename),
+    );
+    return new Request("http://localhost/api/analyze-batch", { method: "POST", body: form });
+  }
+
+  it("verifies each label against its own expected fields", async () => {
+    // ok.png stub returns Old Tom @ 45% — we declare it as such (Pass).
+    // abv-mismatch.png stub returns Old Tom @ 40% — we declare 40% (Pass).
+    // missing-warning.png stub omits the warning — we declare warning required (Fail).
+    const res = await POST(
+      buildPerFilenameRequest(
+        ["ok.png", "abv-mismatch.png", "missing-warning.png"],
+        {
+          "ok.png": HAPPY_EXPECTED,
+          "abv-mismatch.png": { ...HAPPY_EXPECTED, alcohol_content: "40% ABV" },
+          "missing-warning.png": HAPPY_EXPECTED,
+        },
+      ),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as BatchAnalyzeResponse;
+
+    expect(body.labels[0].result.verdict).toBe("Pass");
+    expect(body.labels[1].result.verdict).toBe("Pass"); // each row got its own ABV
+    expect(body.labels[2].result.verdict).toBe("Fail"); // warning missing
+    expect(body.summary).toEqual({
+      total: 3,
+      pass: 2,
+      needs_review: 0,
+      fail: 1,
+      unreadable: 0,
+    });
+  });
+
+  it("matches filename keys case-insensitively", async () => {
+    const res = await POST(
+      buildPerFilenameRequest(["OK.PNG"], { "ok.png": HAPPY_EXPECTED }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as BatchAnalyzeResponse;
+    expect(body.labels[0].result.verdict).toBe("Pass");
+  });
+
+  it("returns 400 listing unmatched filenames when an image has no row", async () => {
+    const res = await POST(
+      buildPerFilenameRequest(
+        ["ok.png", "orphan.png"],
+        { "ok.png": HAPPY_EXPECTED },
+      ),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/no matching row/i);
+    expect(body.error).toContain("orphan.png");
+  });
+
+  it("returns 400 when expectedByFilename is not valid JSON", async () => {
+    const res = await POST(buildPerFilenameRequest(["ok.png"], "{not json"));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/json/i);
+  });
+
+  it("returns 400 when expectedByFilename is empty {}", async () => {
+    const res = await POST(buildPerFilenameRequest(["ok.png"], {}));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/at least one/i);
+  });
+
+  it("returns 400 when neither expected nor expectedByFilename is provided", async () => {
+    const form = new FormData();
+    form.append("image", new File([new Uint8Array([0])], "ok.png", { type: "image/png" }));
+    const req = new Request("http://localhost/api/analyze-batch", {
+      method: "POST",
+      body: form,
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/expected/i);
+  });
+
+  it("returns 400 when BOTH expected and expectedByFilename are provided", async () => {
+    const form = new FormData();
+    form.append("image", new File([new Uint8Array([0])], "ok.png", { type: "image/png" }));
+    form.set("expected", JSON.stringify(HAPPY_EXPECTED));
+    form.set("expectedByFilename", JSON.stringify({ "ok.png": HAPPY_EXPECTED }));
+    const req = new Request("http://localhost/api/analyze-batch", {
+      method: "POST",
+      body: form,
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/not both/i);
+  });
+});
+
 describe("POST /api/analyze-batch — concurrency cap", () => {
   it(`never runs more than ${BATCH_CONCURRENCY} extractor calls in flight`, async () => {
     // Instrumented extractor: track concurrent in-flight count, hold each
