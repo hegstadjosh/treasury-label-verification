@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { POST, BATCH_CONCURRENCY } from "./route";
 import { StubExtractor, type VisionExtractor, type ExtractInput } from "@/lib/vision";
 import { setExtractorForTesting } from "@/lib/extractor-factory";
+import { MAX_IMAGE_BYTES } from "@/lib/upload-validation";
 import type { BatchAnalyzeResponse, ExpectedLabel, ExtractedLabel } from "@/lib/types";
 
 const HAPPY_EXPECTED: ExpectedLabel = {
@@ -63,7 +64,7 @@ describe("POST /api/analyze-batch — happy path", () => {
     //   abv-mismatch.png     → Fail (ABV mismatch)
     //   missing-warning.png  → Fail (warning missing)
     //   lowercase-warning.png→ Fail (warning lowercase)
-    //   low-quality.png      → Pass (values match; notes survive)
+    //   low-quality.png      → Needs Review (values match, confidence/image quality low)
     const filenames = [
       "ok.png",
       "abv-mismatch.png",
@@ -90,13 +91,13 @@ describe("POST /api/analyze-batch — happy path", () => {
     expect(body.labels[1].result.verdict).toBe("Fail");
     expect(body.labels[2].result.verdict).toBe("Fail");
     expect(body.labels[3].result.verdict).toBe("Fail");
-    expect(body.labels[4].result.verdict).toBe("Pass");
+    expect(body.labels[4].result.verdict).toBe("Needs Review");
 
     // Summary matches.
     expect(body.summary).toEqual({
       total: 5,
-      pass: 2,
-      needs_review: 0,
+      pass: 1,
+      needs_review: 1,
       fail: 3,
       unreadable: 0,
     });
@@ -156,6 +157,39 @@ describe("POST /api/analyze-batch — validation errors", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toMatch(/schema/i);
+  });
+
+  it("returns 400 when any uploaded image is not PNG or JPG", async () => {
+    const form = new FormData();
+    form.append("image", new File([new Uint8Array([0])], "ok.png", { type: "image/png" }));
+    form.append("image", new File([new Uint8Array([0])], "bad.gif", { type: "image/gif" }));
+    form.set("expected", JSON.stringify(HAPPY_EXPECTED));
+    const req = new Request("http://localhost/api/analyze-batch", {
+      method: "POST",
+      body: form,
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("bad.gif");
+    expect(body.error).toMatch(/png|jpg/i);
+  });
+
+  it("returns 400 when any uploaded image exceeds the per-file size limit", async () => {
+    const form = new FormData();
+    form.append(
+      "image",
+      new File([new Uint8Array(MAX_IMAGE_BYTES + 1)], "huge.png", { type: "image/png" }),
+    );
+    form.set("expected", JSON.stringify(HAPPY_EXPECTED));
+    const req = new Request("http://localhost/api/analyze-batch", {
+      method: "POST",
+      body: form,
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/limit/i);
   });
 });
 

@@ -23,6 +23,7 @@
 import { z } from "zod";
 import { getExtractor } from "@/lib/extractor-factory";
 import { classifyLabel } from "@/lib/classify";
+import { validateImageFile } from "@/lib/upload-validation";
 import type { ExpectedLabel, LabelResult } from "@/lib/types";
 
 const ExpectedLabelSchema = z.object({
@@ -50,6 +51,10 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!(image instanceof File)) {
     return badRequest("Missing 'image' file part.");
+  }
+  const imageError = validateImageFile(image);
+  if (imageError) {
+    return badRequest(`Invalid image '${image.name}': ${imageError}`);
   }
   if (typeof expectedRaw !== "string" || expectedRaw === "") {
     return badRequest("Missing 'expected' part (JSON-encoded ExpectedLabel).");

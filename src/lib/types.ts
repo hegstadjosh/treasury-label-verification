@@ -18,7 +18,11 @@ export type Field =
   | "class_type"
   | "alcohol_content"
   | "net_contents"
-  | "government_warning";
+  | "government_warning"
+  | "image_quality";
+
+/** Fields that come directly from the application/label comparison. */
+export type ComplianceField = Exclude<Field, "image_quality">;
 
 /** Per-field verdict from comparison. */
 export type FieldVerdict = "Pass" | "Needs Review" | "Fail";
@@ -49,7 +53,7 @@ export interface ExtractedLabel {
   /** Free-form notes the model emitted (image quality, low confidence, etc.). */
   notes?: string;
   /** Per-field confidence 0..1 if the model reported one. */
-  confidence?: Partial<Record<Field, number>>;
+  confidence?: Partial<Record<ComplianceField, number>>;
 }
 
 /** One row of the audit trail. */

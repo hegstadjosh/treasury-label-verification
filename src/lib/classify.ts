@@ -12,6 +12,7 @@
  */
 
 import type {
+  ComplianceField,
   ExpectedLabel,
   ExtractedLabel,
   Field,
@@ -20,10 +21,11 @@ import type {
   LabelVerdict,
 } from "./types";
 import { compareField, compareAbv, compareNetContents } from "./compare";
+import { applyExtractionQualityPolicy } from "./extraction-quality";
 import { checkGovernmentWarning } from "./warning";
 
 /** Order the UI renders fields and the order top_reason walks. */
-const FIELD_ORDER: Field[] = [
+const FIELD_ORDER: ComplianceField[] = [
   "brand_name",
   "class_type",
   "alcohol_content",
@@ -37,7 +39,7 @@ export interface ClassifyOptions {
 }
 
 function evaluateField(
-  field: Field,
+  field: ComplianceField,
   expected: ExpectedLabel,
   extracted: ExtractedLabel,
 ): FieldResult {
@@ -87,7 +89,10 @@ export function classifyLabel(
     };
   }
 
-  const fields = FIELD_ORDER.map((f) => evaluateField(f, expected, extracted));
+  const fields = applyExtractionQualityPolicy(
+    FIELD_ORDER.map((f) => evaluateField(f, expected, extracted)),
+    extracted,
+  );
 
   const firstFail = fields.find((f) => f.verdict === "Fail");
   const firstReview = fields.find((f) => f.verdict === "Needs Review");
@@ -121,5 +126,7 @@ function labelOf(field: Field): string {
       return "Net contents";
     case "government_warning":
       return "Government warning";
+    case "image_quality":
+      return "Image quality";
   }
 }

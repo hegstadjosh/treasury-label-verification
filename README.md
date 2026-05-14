@@ -197,17 +197,17 @@ The repo is wired to Vercel via `vercel.json` + the Vercel CLI. Env vars (`GEMIN
 ## Test strategy (three tiers)
 
 ```bash
-npm test         # unit + integration, fast, no API spend  (102 tests)
+npm test         # unit + integration, fast, no API spend
 npm run test:live # unit + integration + LIVE Gemini smoke (RUN_LIVE_TESTS=1, ~15s for 2 calls)
 npm run check    # lint + test + production build, what CI would run
 ```
 
-**Tier 1 — Pure-core unit tests** (`src/lib/{warning,compare,classify}.test.ts`, 53 tests)
+**Tier 1 — Pure-core unit tests** (`src/lib/{warning,compare,classify}.test.ts`)
 - Exhaustive coverage of the deterministic rules. No mocks, no fixtures — pure inputs and outputs.
 - The government warning validator has the densest coverage: exact match passes, lowercase prefix fails, missing fails, paraphrased fails, internal punctuation strict, whitespace forgiving.
 - These tests run in **~120 ms**. They are the safety net under every other layer.
 
-**Tier 2 — Integration tests** (`src/app/api/**/*.test.ts` + `src/lib/{vision,csv}.test.ts`, 49 tests)
+**Tier 2 — Integration tests** (`src/app/api/**/*.test.ts` + `src/lib/{vision,csv}.test.ts`)
 - Exercise the HTTP routes end-to-end with the `StubExtractor` injected. The route handler, multipart parsing, zod validation, classifier rollup, and JSON response shape are all covered without touching the network.
 - The batch route includes a **concurrency probe** that submits 20 images and asserts peak inflight extractor calls never exceeds the cap (8) and is greater than 1 (i.e. it actually fans out).
 - Filename-keyed stub fixtures let one test file generate a mixed-verdict batch deterministically.
@@ -309,13 +309,13 @@ Batch state lives entirely in the browser. Reload = batch lost. Drill-down is a 
 
 Anyone with the URL can POST images and get extraction results. Acceptable for a prototype; would be the first thing to add for production.
 
-### No upload size limits
+### Upload validation is basic
 
-Neither the client nor the server enforces a per-file or per-batch byte cap. Adversarial 100 MB uploads will land on the function and waste memory. For a stakeholder demo this is fine; for any public deployment, the first hardening pass would add a 10 MB per-file client check and a server-side multipart size guard.
+The client and API both reject non-PNG/JPG files, empty files, and images larger than 4 MB. That keeps the Vercel function from wasting memory on obvious bad inputs. A production version would add stronger content sniffing / magic-byte verification and direct object-storage uploads instead of trusting multipart bodies.
 
 ### Vercel body limit on very large batches
 
-Vercel's serverless function default body limit is ~4.5 MB. Sarah Chen's interview describes peak-season dumps of 200–300 label applications at once; at typical phone-photo sizes (~1–4 MB per JPG) that exceeds the body limit in a single request. The current batch UI works around this with **client-side chunking** — it sends the batch to `/api/analyze-batch` in chunks of 8 labels per request, merges results client-side, and surfaces incremental progress. That's good enough for the prototype's expected demo loads and is documented inline in `src/app/page.tsx`. A production version would either bump the body limit, switch to direct S3 / Azure Blob uploads with signed URLs and pull-by-reference extraction, or use a chunked-upload protocol.
+Vercel's serverless function default body limit is ~4.5 MB. Sarah Chen's interview describes peak-season dumps of 200–300 label applications at once; at typical phone-photo sizes (~1–4 MB per JPG) that exceeds the body limit in a single request. The current batch UI works around this with **client-side chunking** — it sends the batch to `/api/analyze-batch` in chunks capped by both label count and total bytes, merges results client-side, and surfaces incremental progress. That's good enough for the prototype's expected demo loads and is isolated in `src/hooks/batchAnalysisRequest.ts`. A production version would either bump the body limit, switch to direct S3 / Azure Blob uploads with signed URLs and pull-by-reference extraction, or use a chunked-upload protocol.
 
 ### TTB COLA integration is out of scope
 
@@ -327,7 +327,7 @@ From the Marcus Williams interview: TTB's network blocks outbound traffic to man
 
 ### Image quality handling
 
-If the model reports low confidence or notes image issues, those surface in the audit panel — but the UI doesn't currently push a label into `Needs Review` just because confidence is low. That's a deliberate iter-3 deferral: rolling confidence into the verdict is a UX-and-policy decision (what threshold? does it override a clean Pass?) that the spec didn't pin down. The extracted `confidence` and `notes` are pass-through so a future iteration can layer that in without changing the extraction contract.
+The extractor returns per-field confidence and short image-quality notes. `src/lib/extraction-quality.ts` applies a conservative policy after deterministic field comparison: passing fields with confidence below `0.75` become `Needs Review`, and notes that mention glare, blur, cropping, unreadability, or similar quality issues add an `image_quality` review row. Hard compliance failures still take precedence over uncertainty.
 
 ## What a production version would add
 
@@ -337,7 +337,7 @@ In rough priority order:
 2. **Image preprocessing.** Downscale to ≤1200px max dimension before sending. Most label photos are 3000–5000 px tall and that uploads slowly without improving OCR. A simple `sharp` pipeline saves 30–50 % of network time per call.
 3. **Persistence.** Postgres or DynamoDB for batch state; S3 (or Azure Blob) for the source images. Queue results survive reload, reviewers can resume, and audit trails are durable.
 4. **Authentication.** TTB SSO via Azure Entra ID. Per-reviewer activity logging.
-5. **Confidence policy.** Codify: "If extracted confidence on any field is below X, mark Needs Review." That's a policy decision — surface the threshold as a config, not a constant.
+5. **Confidence tuning.** Calibrate the low-confidence threshold against reviewer outcomes and move it to environment/config once the team has real false-positive data.
 6. **COLA integration.** Pull the expected fields from the application record automatically instead of having the reviewer retype them. This is the high-value integration but per Marcus's interview it's a multi-year procurement effort, not a prototype concern.
 7. **Multi-language warnings.** Imports have non-English text. The TTB warning is English-only by regulation, but other label text isn't.
 8. **Adversarial-input hardening.** Request size limits, MIME validation, magic-byte verification, defenses against zip bombs and image-decoder vulnerabilities. The prototype trusts uploads.
@@ -356,16 +356,19 @@ treasury-takehome/
 │   │   ├── compare.ts                # field-level comparison rules (pure)
 │   │   ├── compare.test.ts           # 26 unit tests
 │   │   ├── classify.ts               # Pass/Needs Review/Fail rollup (pure)
-│   │   ├── classify.test.ts          # 10 unit tests
-│   │   ├── vision.ts                 # VisionExtractor interface, StubExtractor, GeminiVisionExtractor
+│   │   ├── classify.test.ts          # verdict-rollup and uncertainty-policy tests
+│   │   ├── extraction-quality.ts     # low-confidence and image-quality policy
+│   │   ├── vision.ts                 # VisionExtractor interface + StubExtractor
+│   │   ├── gemini-vision.ts          # Gemini implementation of VisionExtractor
 │   │   ├── vision.test.ts            # stub unit tests
 │   │   ├── vision.live.test.ts       # GATED live smoke test (RUN_LIVE_TESTS=1)
 │   │   ├── extractor-factory.ts      # selects Stub vs Gemini based on env
 │   │   ├── batch.ts                  # order-preserving mapWithConcurrency helper
+│   │   ├── upload-validation.ts      # shared client/API file type and size checks
 │   │   ├── csv.ts                    # RFC-4180-ish CSV parser + expectedByFilename mapper
 │   │   └── csv.test.ts               # 16 parser unit tests
 │   ├── app/
-│   │   ├── page.tsx                  # batch home (overview + queue + drill-down)
+│   │   ├── page.tsx                  # thin app entrypoint
 │   │   ├── layout.tsx
 │   │   ├── globals.css
 │   │   └── api/
@@ -374,10 +377,13 @@ treasury-takehome/
 │   │       ├── analyze-batch/route.ts
 │   │       └── analyze-batch/route.test.ts
 │   └── components/
-│       ├── MultiUploadZone.tsx       # drag/drop multi-file with thumbnails
+│       ├── BatchReviewApp.tsx        # batch home orchestration
+│       ├── MultiUploadZone.tsx       # drag/drop multi-file upload shell
+│       ├── FileThumb.tsx             # upload thumbnail preview
 │       ├── ExpectedFieldsForm.tsx    # batch-wide expected-fields form
 │       ├── OverviewTiles.tsx         # 4 verdict-count tiles, clickable to filter
 │       ├── QueueTable.tsx            # filterable, sortable label list
+│       ├── QueueTableRow.tsx         # queue row rendering
 │       ├── LabelDrillDown.tsx        # side sheet wrapping ResultPanel
 │       ├── ResultPanel.tsx           # verdict badge + audit table + evidence panel
 │       ├── VerdictBadge.tsx          # colored sm/md/lg badge
@@ -398,4 +404,3 @@ treasury-takehome/
 - The canonical `OLD TOM DISTILLERY` test fixture at `test-fixtures/labels/old-tom-distillery.png` is AI-generated via Google's Nano Banana Pro (`gemini-3-pro-image-preview`) using the example label fields from the take-home brief. It was generated specifically so the live smoke test has a known-good real image to round-trip without scraping any real applicant's label artwork.
 - The 27 CFR §16.21 government warning canonical text was cross-verified against Cornell Legal Information Institute and GovInfo's CFR XML feed before being baked into `warning.ts`. TTB.gov was timing out at the time of writing.
 - Built across roughly four hours of focused work on the day of the deadline. The atomic commit history reflects the actual iteration order, not a post-hoc rewrite.
-

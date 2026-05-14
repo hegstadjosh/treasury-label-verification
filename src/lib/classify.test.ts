@@ -94,6 +94,43 @@ describe("classifyLabel — fields array", () => {
   });
 });
 
+describe("classifyLabel — extraction uncertainty", () => {
+  it("marks a passing field Needs Review when extractor confidence is low", () => {
+    const r = classifyLabel(baseExpected, {
+      ...cleanExtracted,
+      confidence: { alcohol_content: 0.62 },
+    });
+
+    expect(r.verdict).toBe("Needs Review");
+    expect(r.top_reason.toLowerCase()).toContain("confidence");
+    const abv = r.fields.find((f) => f.field === "alcohol_content");
+    expect(abv?.verdict).toBe("Needs Review");
+  });
+
+  it("adds an image-quality review row when the extractor reports glare", () => {
+    const r = classifyLabel(baseExpected, {
+      ...cleanExtracted,
+      notes: "Image quality low — glare partially obscures the ABV.",
+    });
+
+    expect(r.verdict).toBe("Needs Review");
+    expect(r.fields.map((f) => f.field)).toContain("image_quality");
+    expect(r.top_reason.toLowerCase()).toContain("image quality");
+  });
+
+  it("keeps Fail precedence over low-confidence review signals", () => {
+    const r = classifyLabel(baseExpected, {
+      ...cleanExtracted,
+      brand_name: "Wrong Brand",
+      confidence: { alcohol_content: 0.2 },
+      notes: "Image quality low.",
+    });
+
+    expect(r.verdict).toBe("Fail");
+    expect(r.top_reason.toLowerCase()).toContain("brand");
+  });
+});
+
 describe("classifyLabel — unreadable extraction", () => {
   it("returns Unreadable when the extractor signaled total failure", () => {
     const r = classifyLabel(baseExpected, { notes: "image unreadable" }, { unreadable: true });

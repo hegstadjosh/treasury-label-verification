@@ -32,6 +32,7 @@ import { z } from "zod";
 import { getExtractor } from "@/lib/extractor-factory";
 import { classifyLabel } from "@/lib/classify";
 import { mapWithConcurrency } from "@/lib/batch";
+import { validateImageFile } from "@/lib/upload-validation";
 import type {
   BatchAnalyzeResponse,
   BatchLabelEntry,
@@ -72,6 +73,15 @@ export async function POST(request: Request): Promise<Response> {
   const imageParts = form.getAll("image").filter((p): p is File => p instanceof File);
   if (imageParts.length === 0) {
     return badRequest("At least one 'image' file part is required.");
+  }
+  const imageErrors = imageParts
+    .map((image) => {
+      const error = validateImageFile(image);
+      return error ? `${image.name}: ${error}` : null;
+    })
+    .filter((error): error is string => error != null);
+  if (imageErrors.length > 0) {
+    return badRequest(`Invalid image upload: ${imageErrors.slice(0, 5).join("; ")}`);
   }
 
   const expectedRaw = form.get("expected");

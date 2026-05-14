@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { POST } from "./route";
 import { StubExtractor } from "@/lib/vision";
 import { setExtractorForTesting } from "@/lib/extractor-factory";
+import { MAX_IMAGE_BYTES } from "@/lib/upload-validation";
 import type { ExpectedLabel, LabelResult } from "@/lib/types";
 
 const HAPPY_EXPECTED: ExpectedLabel = {
@@ -89,8 +90,7 @@ describe("POST /api/analyze — quality + carry-through", () => {
     const res = await POST(buildRequest("low-quality.png", HAPPY_EXPECTED));
     expect(res.status).toBe(200);
     const body = (await res.json()) as LabelResult;
-    // Low-quality fixture still has correct values, so verdict is Pass —
-    // but the notes/confidence audit trail must survive to the UI.
+    expect(body.verdict).toBe("Needs Review");
     expect(body.extracted.notes).toBeDefined();
     expect(body.extracted.confidence?.alcohol_content).toBeLessThan(1);
   });
@@ -120,6 +120,31 @@ describe("POST /api/analyze — validation errors", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toMatch(/image/i);
+  });
+
+  it("returns 400 when the image MIME type is not supported", async () => {
+    const form = new FormData();
+    form.set("image", new File([new Uint8Array([1])], "label.gif", { type: "image/gif" }));
+    form.set("expected", JSON.stringify(HAPPY_EXPECTED));
+    const req = new Request("http://localhost/api/analyze", { method: "POST", body: form });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/png|jpg/i);
+  });
+
+  it("returns 400 when the image exceeds the per-file size limit", async () => {
+    const form = new FormData();
+    form.set(
+      "image",
+      new File([new Uint8Array(MAX_IMAGE_BYTES + 1)], "huge.png", { type: "image/png" }),
+    );
+    form.set("expected", JSON.stringify(HAPPY_EXPECTED));
+    const req = new Request("http://localhost/api/analyze", { method: "POST", body: form });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/limit/i);
   });
 
   it("returns 400 when the 'expected' part is not valid JSON", async () => {

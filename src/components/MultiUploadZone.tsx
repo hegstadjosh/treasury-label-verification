@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import {
+  ACCEPTED_IMAGE_TYPES,
+  formatBytes,
+  MAX_IMAGE_BYTES,
+  validateImageFile,
+} from "@/lib/upload-validation";
+import { FileThumb } from "./FileThumb";
+import type { UploadedFile } from "./uploadTypes";
 
-const ACCEPTED = ["image/png", "image/jpeg"];
-
-export interface UploadedFile {
-  /** Stable client id used for keying + remove. */
-  id: string;
-  file: File;
-}
+export type { UploadedFile } from "./uploadTypes";
 
 let nextId = 0;
 function makeId(file: File): string {
@@ -37,8 +39,9 @@ export function MultiUploadZone({
       const rejected: string[] = [];
       const accepted: UploadedFile[] = [];
       for (const f of arr) {
-        if (!ACCEPTED.includes(f.type)) {
-          rejected.push(f.name);
+        const validationError = validateImageFile(f);
+        if (validationError) {
+          rejected.push(`${f.name}: ${validationError}`);
           continue;
         }
         accepted.push({ id: makeId(f), file: f });
@@ -49,8 +52,8 @@ export function MultiUploadZone({
       if (rejected.length > 0) {
         setError(
           rejected.length === 1
-            ? `Skipped "${rejected[0]}" — only PNG or JPG images are supported.`
-            : `Skipped ${rejected.length} non-image files. Only PNG or JPG are supported.`,
+            ? `Skipped ${rejected[0]}`
+            : `Skipped ${rejected.length} files. ${rejected.slice(0, 2).join(" ")}`,
         );
       }
     },
@@ -97,14 +100,14 @@ export function MultiUploadZone({
             Choose files
           </button>
           <p className="text-xs text-slate-500">
-            PNG or JPG. Multiple files allowed.
+            PNG or JPG, up to {formatBytes(MAX_IMAGE_BYTES)} each.
           </p>
         </div>
         <input
           ref={inputRef}
           id="label-images"
           type="file"
-          accept="image/png,image/jpeg"
+          accept={ACCEPTED_IMAGE_TYPES.join(",")}
           multiple
           className="hidden"
           onChange={(e) => {
@@ -150,59 +153,4 @@ export function MultiUploadZone({
       ) : null}
     </div>
   );
-}
-
-function FileThumb({
-  upload,
-  onRemove,
-  disabled,
-}: {
-  upload: UploadedFile;
-  onRemove: () => void;
-  disabled?: boolean;
-}) {
-  const url = useMemo(
-    () => URL.createObjectURL(upload.file),
-    [upload.file],
-  );
-  useEffect(() => {
-    return () => URL.revokeObjectURL(url);
-  }, [url]);
-
-  return (
-    <li className="group relative overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={url}
-        alt={upload.file.name}
-        className="aspect-[4/3] w-full object-contain bg-slate-50"
-      />
-      <div className="border-t border-slate-200 px-2 py-1.5">
-        <p
-          className="truncate text-xs font-medium text-slate-800"
-          title={upload.file.name}
-        >
-          {upload.file.name}
-        </p>
-        <p className="text-[10px] text-slate-500">
-          {formatBytes(upload.file.size)}
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={disabled}
-        aria-label={`Remove ${upload.file.name}`}
-        className="absolute right-1 top-1 rounded-full bg-white/90 px-1.5 py-0.5 text-xs font-semibold text-slate-700 shadow ring-1 ring-slate-300 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
-      >
-        ×
-      </button>
-    </li>
-  );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

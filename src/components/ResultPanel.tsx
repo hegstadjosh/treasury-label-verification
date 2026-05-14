@@ -14,6 +14,7 @@ const FIELD_LABELS: Record<Field, string> = {
   alcohol_content: "Alcohol content",
   net_contents: "Net contents",
   government_warning: "Government warning",
+  image_quality: "Image quality",
 };
 
 export function ResultPanel({ result }: { result: LabelResult }) {
