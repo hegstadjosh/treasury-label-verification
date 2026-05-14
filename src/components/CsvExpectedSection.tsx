@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, type DragEvent } from "react";
 import type { CsvParseResult } from "@/lib/csv";
 
 export function CsvExpectedSection({
@@ -19,7 +20,7 @@ export function CsvExpectedSection({
     <>
       <p className="mt-3 text-sm text-slate-600">
         Upload a spreadsheet saved as CSV. Each row must use the same filename
-        as its label image. Required columns:{" "}
+        as its label image (case-insensitive). Required columns:{" "}
         <CsvCode>filename</CsvCode>, <CsvCode>brand_name</CsvCode>,{" "}
         <CsvCode>class_type</CsvCode>, <CsvCode>alcohol_content</CsvCode>,{" "}
         <CsvCode>net_contents</CsvCode>. Optional:{" "}
@@ -32,7 +33,7 @@ export function CsvExpectedSection({
       >
         Download sample spreadsheet
       </a>
-      <CsvFileInput
+      <CsvDropzone
         csvFilename={csvFilename}
         disabled={disabled}
         onFile={onFile}
@@ -47,7 +48,11 @@ function CsvCode({ children }: { children: React.ReactNode }) {
   return <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">{children}</code>;
 }
 
-function CsvFileInput({
+/**
+ * Drag-and-drop + click-to-pick spreadsheet input. Mirrors the multi-image
+ * dropzone so the two upload surfaces feel consistent.
+ */
+function CsvDropzone({
   csvFilename,
   disabled,
   onFile,
@@ -58,15 +63,69 @@ function CsvFileInput({
   onFile: (file: File) => void;
   onClear: () => void;
 }) {
+  const [isOver, setIsOver] = useState(false);
+
+  function acceptable(file: File): boolean {
+    if (file.name.toLowerCase().endsWith(".csv")) return true;
+    return file.type === "text/csv" || file.type === "application/vnd.ms-excel";
+  }
+
+  function handleDrop(e: DragEvent<HTMLLabelElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsOver(false);
+    if (disabled) return;
+    const file = Array.from(e.dataTransfer.files).find(acceptable);
+    if (file) onFile(file);
+  }
+
+  function handleDragOver(e: DragEvent<HTMLLabelElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!disabled) setIsOver(true);
+  }
+
+  function handleDragLeave(e: DragEvent<HTMLLabelElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsOver(false);
+  }
+
   return (
-    <div className="mt-3 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+    <div className="mt-3 flex flex-col items-stretch gap-3">
       <label
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragEnter={handleDragOver}
+        onDragLeave={handleDragLeave}
         className={
-          "inline-flex cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 " +
-          (disabled ? "cursor-not-allowed opacity-50" : "")
+          "flex cursor-pointer flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed px-4 py-6 text-center text-sm transition-colors " +
+          (disabled
+            ? "cursor-not-allowed border-slate-200 bg-slate-50 opacity-60"
+            : isOver
+              ? "border-blue-500 bg-blue-50 text-blue-900"
+              : csvFilename
+                ? "border-emerald-300 bg-emerald-50 text-emerald-900 hover:border-emerald-400"
+                : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50")
         }
       >
-        {csvFilename ? "Replace spreadsheet" : "Choose spreadsheet"}
+        {csvFilename ? (
+          <>
+            <span className="font-medium">Loaded: {csvFilename}</span>
+            <span className="text-xs text-emerald-700/80">
+              Drop another spreadsheet or click to replace.
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="font-medium">
+              Drop a spreadsheet here, or click to choose
+            </span>
+            <span className="text-xs text-slate-500">
+              .csv from Excel, Google Sheets, or anywhere else.
+            </span>
+          </>
+        )}
         <input
           type="file"
           accept=".csv,text/csv"
@@ -80,15 +139,14 @@ function CsvFileInput({
         />
       </label>
       {csvFilename ? (
-        <div className="flex items-center gap-2 text-sm text-slate-700">
-          <span className="truncate">{csvFilename}</span>
+        <div className="flex items-center justify-end text-sm text-slate-700">
           <button
             type="button"
             onClick={onClear}
             disabled={disabled}
-            className="text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+            className="text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline disabled:opacity-50"
           >
-            clear
+            clear spreadsheet
           </button>
         </div>
       ) : null}
@@ -98,11 +156,7 @@ function CsvFileInput({
 
 function CsvPreview({ csvParsed }: { csvParsed: CsvParseResult | null }) {
   if (!csvParsed) {
-    return (
-      <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-center text-xs text-slate-500">
-        No CSV loaded yet.
-      </div>
-    );
+    return null;
   }
   if (!csvParsed.ok) {
     return (
