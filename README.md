@@ -36,7 +36,7 @@ The deployed app runs against the real Gemini API behind a `USE_REAL_VISION=1` f
 
 TTB reviews ~150,000 alcohol label applications a year. The current workflow is mostly visual matching — the agent opens the application, pulls up the label artwork, and verifies that what's printed matches what was declared: brand name, class/type, ABV, net contents, and the canonical 27 CFR §16.21 government warning. The deputy director describes "half our day doing what's essentially data-entry verification."
 
-This prototype is the **assistant** that handles the routine matching. Reviewers upload a batch of labels and the associated expected facts; the system extracts the visible label text with a vision model, runs a deterministic comparison against the applicant's claims, and produces:
+This prototype is the **assistant** that handles the routine matching. Reviewers upload a batch of labels (and the associated expected facts — either one declared set that applies to every label, or a per-label CSV when the batch is many different products from one importer); the system extracts the visible label text with a vision model, runs a deterministic comparison against each label's claims, and produces:
 
 - An **overview** — Pass / Needs Review / Fail / Unreadable counts
 - A **filterable queue** of every label with its verdict and top reason
@@ -56,6 +56,10 @@ Four decisions drove the architecture:
 **2. Government warning is the strictest rule.** From the Jenny Park interview: the warning has to match TTB's canonical text **verbatim**, including the all-caps `GOVERNMENT WARNING:` prefix. Title-case "Government Warning" is an automatic reject. Other fields are forgiving on case, punctuation, and unit notation (`750 mL` = `750ml` = `0.75L`); the warning is not. That asymmetry is enforced in the comparison rules, not in the model prompt.
 
 **3. Autonomous-first, exception-driven review.** Per the build plan: the system makes the decision; the reviewer's role is to drill into the exception queue. Most labels never need a human glance. This shaped the UX — the **batch overview** is the home screen, not a stretch goal, and Fail / Needs Review / Unreadable rows surface at the top of the queue by default.
+
+**3a. Two batch modes for two real workflows.** Sarah Chen's interview names two pain points: (i) "big importers who dump 200, 300 label applications on us at once" — every label a different product with its own expected facts — and (ii) the small case where one product gets reviewed across multiple photos or design iterations. The app supports both via a mode toggle:
+- **Same for all** — one declared-fields form applies to every uploaded label. Right for same-product runs.
+- **Per-label CSV** — reviewer uploads a CSV mapping each filename to its OWN expected fields, then drops in the matching images. Right for the importer-batch case. In a future COLA integration, the same `expectedByFilename` map would be auto-populated from the application records — the CSV is the believable production seam for an offline prototype.
 
 **4. Three-tier testing.** Pure-core unit tests (fast, deterministic, exhaustive) → integration tests against the route with a `StubExtractor` (no API spend) → one gated live smoke test against the real Gemini API (run before submitting, never in CI). Each tier earns its keep; nothing duplicates.
 
@@ -149,6 +153,21 @@ npm run dev
 # open http://localhost:3000
 ```
 
+The home page has two batch modes (toggle at the top of step 2 on the page):
+
+- **Same for all** — one ExpectedLabel form, applied to every uploaded image. Best for same-product runs.
+- **Per-label CSV** — upload a CSV mapping `filename → expected fields`. The app validates the CSV up front, matches each image to its row by filename (case-insensitive), and blocks the Analyze button if any image is unmatched. Best for multi-product importer batches.
+
+CSV format (header row required):
+
+```csv
+filename,brand_name,class_type,alcohol_content,net_contents,government_warning_required
+ok.png,Old Tom Distillery,Straight Bourbon Whiskey,45% ABV,750 mL,true
+"vineyard.png","Crisp Vineyards","Cabernet Sauvignon","13.5% ABV","750 mL",true
+```
+
+The parser handles RFC-4180-style quoting (commas inside quoted fields, escaped `""` quotes). `government_warning_required` is optional (defaults to `true`).
+
 In dev mode, image uploads route through the `StubExtractor`, which keys off the **filename** (case-insensitive, extension-stripped) to return one of five canned extraction outputs:
 
 | Filename | Result |
@@ -178,7 +197,7 @@ The repo is wired to Vercel via `vercel.json` + the Vercel CLI. Env vars (`GEMIN
 ## Test strategy (three tiers)
 
 ```bash
-npm test         # unit + integration, fast, no API spend  (79 tests)
+npm test         # unit + integration, fast, no API spend  (102 tests)
 npm run test:live # unit + integration + LIVE Gemini smoke (RUN_LIVE_TESTS=1, ~15s for 2 calls)
 npm run check    # lint + test + production build, what CI would run
 ```
@@ -188,10 +207,11 @@ npm run check    # lint + test + production build, what CI would run
 - The government warning validator has the densest coverage: exact match passes, lowercase prefix fails, missing fails, paraphrased fails, internal punctuation strict, whitespace forgiving.
 - These tests run in **~120 ms**. They are the safety net under every other layer.
 
-**Tier 2 — Integration tests** (`src/app/api/**/*.test.ts` + `src/lib/vision.test.ts`, 26 tests)
+**Tier 2 — Integration tests** (`src/app/api/**/*.test.ts` + `src/lib/{vision,csv}.test.ts`, 49 tests)
 - Exercise the HTTP routes end-to-end with the `StubExtractor` injected. The route handler, multipart parsing, zod validation, classifier rollup, and JSON response shape are all covered without touching the network.
 - The batch route includes a **concurrency probe** that submits 20 images and asserts peak inflight extractor calls never exceeds the cap (8) and is greater than 1 (i.e. it actually fans out).
 - Filename-keyed stub fixtures let one test file generate a mixed-verdict batch deterministically.
+- The per-label CSV path is independently covered: 16 CSV-parser tests (RFC-4180 quoting, case-insensitive filename match, duplicate detection, header validation, trailing-blank tolerance) and 7 new batch-route tests for `expectedByFilename` (happy path with mixed expected sets, case-insensitive filename match, 400 listing unmatched filenames, the "either-but-not-both" enforcement, empty-CSV rejection).
 
 **Tier 3 — Live smoke test** (`src/lib/vision.live.test.ts`, 2 tests, gated by `RUN_LIVE_TESTS=1`)
 - Runs the real `GeminiVisionExtractor` against the canonical `OLD TOM DISTILLERY` fixture (AI-generated, but with all five required fields rendered crisply).
@@ -237,11 +257,15 @@ Coverage report: `npx vitest run --coverage`.
 
 **Response 500** — reserved for unexpected programming bugs. Extractor failure does **not** produce 500; it produces 200 with `verdict: "Unreadable"`.
 
-### `POST /api/analyze-batch` — many labels, one expected-set
+### `POST /api/analyze-batch` — many labels
 
 **Request** (`multipart/form-data`):
 - `image` — append once per file (`form.append("image", file)` for each). Server reads via `form.getAll("image")`.
-- `expected` — one JSON-encoded `ExpectedLabel` applied to every image in the batch.
+- **Exactly one of:**
+  - `expected` — one JSON-encoded `ExpectedLabel` applied to every image in the batch (same-product mode).
+  - `expectedByFilename` — JSON-encoded `Record<string, ExpectedLabel>` keyed by image filename (case-insensitive). Every uploaded image must have a matching row, otherwise the route returns 400 listing the unmatched filenames.
+
+If both `expected` and `expectedByFilename` are present, the route returns 400. This is intentional — the two modes are mutually exclusive and silently picking one would be a footgun.
 
 **Response 200** — `BatchAnalyzeResponse`:
 ```ts
@@ -337,7 +361,9 @@ treasury-takehome/
 │   │   ├── vision.test.ts            # stub unit tests
 │   │   ├── vision.live.test.ts       # GATED live smoke test (RUN_LIVE_TESTS=1)
 │   │   ├── extractor-factory.ts      # selects Stub vs Gemini based on env
-│   │   └── batch.ts                  # order-preserving mapWithConcurrency helper
+│   │   ├── batch.ts                  # order-preserving mapWithConcurrency helper
+│   │   ├── csv.ts                    # RFC-4180-ish CSV parser + expectedByFilename mapper
+│   │   └── csv.test.ts               # 16 parser unit tests
 │   ├── app/
 │   │   ├── page.tsx                  # batch home (overview + queue + drill-down)
 │   │   ├── layout.tsx

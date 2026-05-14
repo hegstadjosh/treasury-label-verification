@@ -12,11 +12,28 @@ import {
 } from "@/components/OverviewTiles";
 import { QueueTable } from "@/components/QueueTable";
 import { LabelDrillDown } from "@/components/LabelDrillDown";
+import { parseExpectedByFilenameCsv, type CsvParseResult } from "@/lib/csv";
 import type {
   BatchAnalyzeResponse,
   BatchLabelEntry,
   ExpectedLabel,
 } from "@/lib/types";
+
+/**
+ * Match modes determine how each label is paired with expected fields.
+ *
+ * `shared` — one expected set applies to every label in the batch. Useful
+ *   for same-product runs (label-design iteration, QC). This was the
+ *   original iter-4 model.
+ *
+ * `per-file` — reviewer uploads a CSV (or pasted CSV text) mapping each
+ *   filename to its OWN expected fields. This is the realistic flow for
+ *   Sarah Chen's "200 importer applications dumped at once" scenario,
+ *   where every label is a different product. In a production COLA
+ *   integration the same `expectedByFilename` map would be auto-populated
+ *   from the application record; the CSV is a believable stand-in.
+ */
+type MatchMode = "shared" | "per-file";
 
 const EMPTY_EXPECTED: ExpectedLabel = {
   brand_name: "",
@@ -62,7 +79,10 @@ const EMPTY_SUMMARY = {
 
 export default function Home() {
   const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [matchMode, setMatchMode] = useState<MatchMode>("shared");
   const [expected, setExpected] = useState<ExpectedLabel>(EMPTY_EXPECTED);
+  const [csvText, setCsvText] = useState<string>("");
+  const [csvFilename, setCsvFilename] = useState<string>("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [filter, setFilter] = useState<VerdictFilter>(null);
   const [selected, setSelected] = useState<BatchLabelEntry | null>(null);
@@ -74,7 +94,36 @@ export default function Home() {
     expected.alcohol_content.trim() !== "" ||
     expected.net_contents.trim() !== "";
   const busy = status.kind === "loading" || isPending;
-  const canAnalyze = files.length > 0 && hasAnyExpected && !busy;
+
+  // Parse the CSV text once per change. Pure function, cheap.
+  const csvParsed: CsvParseResult | null = useMemo(
+    () => (csvText.trim() === "" ? null : parseExpectedByFilenameCsv(csvText)),
+    [csvText],
+  );
+
+  // In per-file mode, every uploaded image must have a matching CSV row.
+  // We surface matched/unmatched lists in the UI and use them to gate the
+  // Analyze button so the reviewer can fix mismatches before sending.
+  const matchStatus = useMemo(() => {
+    if (matchMode !== "per-file" || !csvParsed || !csvParsed.ok) return null;
+    const matched: string[] = [];
+    const unmatched: string[] = [];
+    for (const { file } of files) {
+      if (csvParsed.byFilename[file.name.toLowerCase()]) {
+        matched.push(file.name);
+      } else {
+        unmatched.push(file.name);
+      }
+    }
+    return { matched, unmatched };
+  }, [matchMode, csvParsed, files]);
+
+  const canAnalyze =
+    !busy &&
+    files.length > 0 &&
+    (matchMode === "shared"
+      ? hasAnyExpected
+      : csvParsed?.ok === true && (matchStatus?.unmatched.length ?? 0) === 0);
 
   const response: BatchAnalyzeResponse =
     status.kind === "done"
@@ -89,8 +138,19 @@ export default function Home() {
     return response.labels.find((l) => l.id === selected.id) ?? null;
   }, [response.labels, selected]);
 
+  async function handleCsvFile(file: File) {
+    const text = await file.text();
+    setCsvText(text);
+    setCsvFilename(file.name);
+  }
+
+  function clearCsv() {
+    setCsvText("");
+    setCsvFilename("");
+  }
+
   async function analyze() {
-    if (files.length === 0 || !hasAnyExpected) return;
+    if (!canAnalyze) return;
     setSelected(null);
     setFilter(null);
 
@@ -107,11 +167,27 @@ export default function Home() {
       });
     });
 
+    // In per-file mode, narrow the byFilename map to just this chunk's
+    // filenames before sending — keeps each request's body small and the
+    // server contract simple (every uploaded image has a matching row).
+    const byFilenameAll =
+      matchMode === "per-file" && csvParsed?.ok ? csvParsed.byFilename : null;
+
     for (let offset = 0; offset < total; offset += CLIENT_CHUNK_SIZE) {
       const chunk = files.slice(offset, offset + CLIENT_CHUNK_SIZE);
       const form = new FormData();
       for (const { file } of chunk) form.append("image", file);
-      form.append("expected", JSON.stringify(expected));
+      if (matchMode === "shared") {
+        form.append("expected", JSON.stringify(expected));
+      } else if (byFilenameAll) {
+        const subset: Record<string, ExpectedLabel> = {};
+        for (const { file } of chunk) {
+          const key = file.name.toLowerCase();
+          const row = byFilenameAll[key];
+          if (row) subset[key] = row;
+        }
+        form.append("expectedByFilename", JSON.stringify(subset));
+      }
 
       let body: BatchAnalyzeResponse;
       try {
@@ -179,6 +255,8 @@ export default function Home() {
   function reset() {
     setFiles([]);
     setExpected(EMPTY_EXPECTED);
+    setCsvText("");
+    setCsvFilename("");
     setStatus({ kind: "idle" });
     setFilter(null);
     setSelected(null);
@@ -214,8 +292,9 @@ export default function Home() {
               1. Upload labels
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Drag and drop, or choose files. PNG or JPG. The same declared
-              fields will be checked against every label in the batch.
+              {matchMode === "shared"
+                ? "Drag and drop, or choose files. PNG or JPG. The same declared fields will be checked against every label in the batch."
+                : "Drag and drop, or choose files. PNG or JPG. Each label is matched to its own CSV row by filename (case-insensitive)."}
             </p>
             <div className="mt-4">
               <MultiUploadZone
@@ -224,37 +303,95 @@ export default function Home() {
                 disabled={busy}
               />
             </div>
+            {matchStatus && (matchStatus.matched.length > 0 || matchStatus.unmatched.length > 0) ? (
+              <div className="mt-3 text-xs">
+                {matchStatus.matched.length > 0 ? (
+                  <p className="text-emerald-700">
+                    Matched {matchStatus.matched.length} of {files.length} to CSV rows.
+                  </p>
+                ) : null}
+                {matchStatus.unmatched.length > 0 ? (
+                  <div className="mt-1 text-rose-700">
+                    <p className="font-medium">
+                      No CSV row for: {matchStatus.unmatched.slice(0, 3).join(", ")}
+                      {matchStatus.unmatched.length > 3 ? `, +${matchStatus.unmatched.length - 3} more` : ""}.
+                    </p>
+                    <p className="mt-0.5 text-rose-600/80">
+                      Add rows to the CSV with these filenames, or remove the images.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold text-slate-900">
               2. Declared fields
             </h2>
-            <p className="mt-1 text-sm text-slate-600">
-              What the applicant said the label says. Leave a field blank to
-              skip it.
-            </p>
-            <div className="mt-4">
-              <ExpectedFieldsForm
-                value={expected}
-                onChange={setExpected}
+            <div className="mt-3" role="radiogroup" aria-label="Expected-fields source">
+              <ModeToggle
+                value={matchMode}
+                onChange={setMatchMode}
                 disabled={busy}
               />
             </div>
+            {matchMode === "shared" ? (
+              <>
+                <p className="mt-3 text-sm text-slate-600">
+                  What the applicant said the label says. Leave a field blank to skip it.
+                  Same values apply to every label in the batch.
+                </p>
+                <div className="mt-3">
+                  <ExpectedFieldsForm
+                    value={expected}
+                    onChange={setExpected}
+                    disabled={busy}
+                  />
+                </div>
+              </>
+            ) : (
+              <CsvExpectedSection
+                csvFilename={csvFilename}
+                csvParsed={csvParsed}
+                onFile={handleCsvFile}
+                onClear={clearCsv}
+                disabled={busy}
+              />
+            )}
           </section>
         </div>
 
         <div className="mt-6 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-slate-600">
-            {files.length === 0
-              ? "Add at least one image to begin."
-              : !hasAnyExpected
-                ? "Enter at least one declared field to enable analysis."
-                : status.kind === "loading"
-                  ? `Analyzed ${status.processed} of ${status.total} label${status.total === 1 ? "" : "s"}…`
-                  : busy
-                    ? `Analyzing ${files.length} label${files.length === 1 ? "" : "s"}…`
-                    : `Ready to analyze ${files.length} label${files.length === 1 ? "" : "s"}.`}
+            {(() => {
+              if (status.kind === "loading") {
+                return `Analyzed ${status.processed} of ${status.total} label${status.total === 1 ? "" : "s"}…`;
+              }
+              if (busy) {
+                return `Analyzing ${files.length} label${files.length === 1 ? "" : "s"}…`;
+              }
+              if (files.length === 0) {
+                return "Add at least one image to begin.";
+              }
+              if (matchMode === "shared") {
+                if (!hasAnyExpected) {
+                  return "Enter at least one declared field to enable analysis.";
+                }
+              } else {
+                if (!csvParsed) {
+                  return "Upload a CSV with per-label expected fields.";
+                }
+                if (!csvParsed.ok) {
+                  return "Fix the CSV errors before analyzing.";
+                }
+                const unmatched = matchStatus?.unmatched.length ?? 0;
+                if (unmatched > 0) {
+                  return `${unmatched} image${unmatched === 1 ? " has" : "s have"} no matching CSV row. Fix the mapping or remove them.`;
+                }
+              }
+              return `Ready to analyze ${files.length} label${files.length === 1 ? "" : "s"}.`;
+            })()}
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -321,6 +458,143 @@ export default function Home() {
         onClose={() => setSelected(null)}
       />
     </div>
+  );
+}
+
+function ModeToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: MatchMode;
+  onChange: (mode: MatchMode) => void;
+  disabled?: boolean;
+}) {
+  const options: Array<{ value: MatchMode; label: string; sub: string }> = [
+    {
+      value: "shared",
+      label: "Same for all",
+      sub: "One product, many photos",
+    },
+    {
+      value: "per-file",
+      label: "Per-label CSV",
+      sub: "Multiple applications, each with its own fields",
+    },
+  ];
+  return (
+    <div className="inline-flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-1 sm:flex-row">
+      {options.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={disabled}
+            onClick={() => onChange(opt.value)}
+            className={
+              "rounded px-3 py-2 text-left text-sm transition-colors disabled:opacity-50 " +
+              (selected
+                ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200"
+                : "text-slate-600 hover:text-slate-900")
+            }
+          >
+            <div className="font-medium">{opt.label}</div>
+            <div className="text-xs text-slate-500">{opt.sub}</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CsvExpectedSection({
+  csvFilename,
+  csvParsed,
+  onFile,
+  onClear,
+  disabled,
+}: {
+  csvFilename: string;
+  csvParsed: CsvParseResult | null;
+  onFile: (file: File) => void;
+  onClear: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <>
+      <p className="mt-3 text-sm text-slate-600">
+        Upload a CSV with one row per label. Required columns:
+        {" "}<code className="rounded bg-slate-100 px-1 py-0.5 text-xs">filename</code>,
+        {" "}<code className="rounded bg-slate-100 px-1 py-0.5 text-xs">brand_name</code>,
+        {" "}<code className="rounded bg-slate-100 px-1 py-0.5 text-xs">class_type</code>,
+        {" "}<code className="rounded bg-slate-100 px-1 py-0.5 text-xs">alcohol_content</code>,
+        {" "}<code className="rounded bg-slate-100 px-1 py-0.5 text-xs">net_contents</code>.
+        Optional: <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">government_warning_required</code> (true/false, default true).
+      </p>
+
+      <div className="mt-3 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+        <label
+          className={
+            "inline-flex cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 " +
+            (disabled ? "cursor-not-allowed opacity-50" : "")
+          }
+        >
+          {csvFilename ? "Replace CSV" : "Choose CSV file"}
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            className="sr-only"
+            disabled={disabled}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onFile(f);
+              // reset value so the same file can be re-uploaded after edit
+              e.target.value = "";
+            }}
+          />
+        </label>
+        {csvFilename ? (
+          <div className="flex items-center gap-2 text-sm text-slate-700">
+            <span className="truncate">{csvFilename}</span>
+            <button
+              type="button"
+              onClick={onClear}
+              disabled={disabled}
+              className="text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+            >
+              clear
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {csvParsed ? (
+        csvParsed.ok ? (
+          <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+            Parsed {csvParsed.rows.length} row{csvParsed.rows.length === 1 ? "" : "s"}. Filenames:
+            <div className="mt-1 font-mono text-slate-600">
+              {csvParsed.rows.slice(0, 6).map((r) => r.filename).join(", ")}
+              {csvParsed.rows.length > 6 ? `, +${csvParsed.rows.length - 6} more` : ""}
+            </div>
+          </div>
+        ) : (
+          <div
+            role="alert"
+            className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900"
+          >
+            <span className="font-medium">CSV error. </span>
+            {csvParsed.error}
+          </div>
+        )
+      ) : (
+        <div className="mt-4 rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-center text-xs text-slate-500">
+          No CSV loaded yet.
+        </div>
+      )}
+    </>
   );
 }
 
