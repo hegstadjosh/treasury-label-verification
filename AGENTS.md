@@ -25,7 +25,7 @@ src/lib/types.ts        ← Field, ExtractedLabel, ExpectedLabel, FieldResult, L
 src/app/api/analyze     ← single-label route, wires vision+compare+classify
 src/app/api/analyze-batch ← batch fan-out (concurrency cap 8)
 src/app/page.tsx        ← batch upload + overview + queue (MAIN view)
-src/app/labels/[id]/page.tsx ← per-label drill-down with full evidence
+src/components/LabelDrillDown.tsx ← per-label drill-down side sheet (no separate route; batch state is in-memory)
 ```
 
 ## File ownership (when working as a teammate)
