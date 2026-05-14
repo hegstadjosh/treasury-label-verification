@@ -1,17 +1,28 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import type { BatchLabelEntry } from "@/lib/types";
 import { ResultPanel } from "./ResultPanel";
 
 export function LabelDrillDown({
   entry,
+  imageFile,
   onClose,
 }: {
   entry: BatchLabelEntry | null;
+  imageFile: File | null;
   onClose: () => void;
 }) {
   const open = entry !== null;
+  const imageUrl = useMemo(
+    () => imageFile ? URL.createObjectURL(imageFile) : null,
+    [imageFile],
+  );
+
+  useEffect(() => {
+    if (!imageUrl) return;
+    return () => URL.revokeObjectURL(imageUrl);
+  }, [imageUrl]);
 
   // Close on Escape; lock body scroll while open.
   useEffect(() => {
@@ -69,9 +80,47 @@ export function LabelDrillDown({
         </header>
 
         <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          <LabelImagePreview
+            imageUrl={imageUrl}
+            filename={entry.filename}
+          />
           <ResultPanel result={entry.result} />
         </div>
       </aside>
     </div>
+  );
+}
+
+function LabelImagePreview({
+  imageUrl,
+  filename,
+}: {
+  imageUrl: string | null;
+  filename: string;
+}) {
+  return (
+    <section className="mb-4 rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-200 px-5 py-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
+          Label image
+        </h3>
+      </div>
+      <div className="bg-slate-100 p-3">
+        {imageUrl ? (
+          <div className="flex justify-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imageUrl}
+              alt={`Uploaded label ${filename}`}
+              className="block max-h-[24rem] max-w-full rounded border border-slate-200 bg-white"
+            />
+          </div>
+        ) : (
+          <div className="rounded border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">
+            Image preview is not available for this result.
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

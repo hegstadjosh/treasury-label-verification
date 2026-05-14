@@ -51,6 +51,11 @@ export function useBatchAnalysis() {
     () => selected ? response.labels.find((l) => l.id === selected.id) ?? null : null,
     [response.labels, selected],
   );
+  const selectedImageFile = useMemo(() => {
+    if (!selectedFromResponse) return null;
+    const index = response.labels.findIndex((l) => l.id === selectedFromResponse.id);
+    return index >= 0 ? files[index]?.file ?? null : null;
+  }, [files, response.labels, selectedFromResponse]);
 
   async function handleCsvFile(file: File) {
     setCsvText(await file.text());
@@ -107,6 +112,7 @@ export function useBatchAnalysis() {
     selected,
     setSelected,
     selectedFromResponse,
+    selectedImageFile,
     busy,
     canAnalyze,
     analyze,

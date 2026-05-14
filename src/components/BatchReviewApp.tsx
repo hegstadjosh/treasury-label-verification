@@ -62,6 +62,7 @@ export function BatchReviewApp() {
 
       <LabelDrillDown
         entry={batch.selectedFromResponse}
+        imageFile={batch.selectedImageFile}
         onClose={() => batch.setSelected(null)}
       />
     </div>
