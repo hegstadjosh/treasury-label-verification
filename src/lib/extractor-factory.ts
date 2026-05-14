@@ -1,15 +1,18 @@
 /**
  * Selects which `VisionExtractor` implementation the route should use.
  *
- * Default: `StubExtractor` — no network calls, no spend.
- * Real Gemini wiring lands in iter-3; this factory will grow a branch then.
+ * Default: `StubExtractor` — no network calls, no spend. CI and local tests
+ * stay deterministic and free.
  *
- * The opt-in env flag is `USE_REAL_VISION=1`. Even with `GEMINI_API_KEY`
- * set, the stub is used unless that flag is on — so CI and local tests
- * never accidentally hit the live API.
+ * Real Gemini is opt-in: both `USE_REAL_VISION=1` AND a non-empty
+ * `GEMINI_API_KEY` must be set. Either alone falls back to the stub. That
+ * combination is what production runs with.
+ *
+ * `setExtractorForTesting` is a test-only override used by the integration
+ * tests in `route.test.ts`.
  */
 
-import { StubExtractor, type VisionExtractor } from "./vision";
+import { GeminiVisionExtractor, StubExtractor, type VisionExtractor } from "./vision";
 
 let override: VisionExtractor | null = null;
 
@@ -20,6 +23,11 @@ export function setExtractorForTesting(ex: VisionExtractor | null): void {
 
 export function getExtractor(): VisionExtractor {
   if (override) return override;
-  // Iter-3 will branch here on `process.env.USE_REAL_VISION === "1"`.
+
+  const useReal = process.env.USE_REAL_VISION === "1";
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (useReal && apiKey) {
+    return new GeminiVisionExtractor({ apiKey });
+  }
   return new StubExtractor();
 }
