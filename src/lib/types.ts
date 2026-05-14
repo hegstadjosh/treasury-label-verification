@@ -71,3 +71,27 @@ export interface LabelResult {
   /** Carried through so the drill-down view can show what the model saw. */
   extracted: ExtractedLabel;
 }
+
+/** One row in the batch response — a result plus the identity the UI keys off. */
+export interface BatchLabelEntry {
+  /** Stable per-label id. Suggested format: `${index}-${filename}`. */
+  id: string;
+  filename: string;
+  result: LabelResult;
+}
+
+/** Aggregate counts surfaced as overview metrics in the batch UI. */
+export interface BatchSummary {
+  total: number;
+  pass: number;
+  needs_review: number;
+  fail: number;
+  unreadable: number;
+}
+
+/** Response shape for POST /api/analyze-batch. */
+export interface BatchAnalyzeResponse {
+  /** Per-label results, in upload order (NOT completion order). */
+  labels: BatchLabelEntry[];
+  summary: BatchSummary;
+}
