@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useState } from "react";
+import { useImageDataUrl } from "@/hooks/useImageDataUrl";
 import type { BatchLabelEntry } from "@/lib/types";
 import { ResultPanel } from "./ResultPanel";
 
@@ -14,15 +15,7 @@ export function LabelDrillDown({
   onClose: () => void;
 }) {
   const open = entry !== null;
-  const imageUrl = useMemo(
-    () => imageFile ? URL.createObjectURL(imageFile) : null,
-    [imageFile],
-  );
-
-  useEffect(() => {
-    if (!imageUrl) return;
-    return () => URL.revokeObjectURL(imageUrl);
-  }, [imageUrl]);
+  const imageUrl = useImageDataUrl(imageFile);
 
   // Close on Escape; lock body scroll while open.
   useEffect(() => {
@@ -98,6 +91,9 @@ function LabelImagePreview({
   imageUrl: string | null;
   filename: string;
 }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const canPreview = imageUrl && failedUrl !== imageUrl;
+
   return (
     <section className="mb-4 rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-5 py-3">
@@ -106,12 +102,13 @@ function LabelImagePreview({
         </h3>
       </div>
       <div className="bg-slate-100 p-3">
-        {imageUrl ? (
+        {canPreview ? (
           <div className="flex justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={imageUrl}
               alt={`Uploaded label ${filename}`}
+              onError={() => setFailedUrl(imageUrl)}
               className="block max-h-[24rem] max-w-full rounded border border-slate-200 bg-white"
             />
           </div>

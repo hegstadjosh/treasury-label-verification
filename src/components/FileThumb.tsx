@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useState } from "react";
+import { useImageDataUrl } from "@/hooks/useImageDataUrl";
 import { formatBytes } from "@/lib/upload-validation";
 import type { UploadedFile } from "./uploadTypes";
 
@@ -13,20 +14,25 @@ export function FileThumb({
   onRemove: () => void;
   disabled?: boolean;
 }) {
-  const url = useMemo(() => URL.createObjectURL(upload.file), [upload.file]);
-
-  useEffect(() => {
-    return () => URL.revokeObjectURL(url);
-  }, [url]);
+  const url = useImageDataUrl(upload.file);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const canPreview = url && failedUrl !== url;
 
   return (
     <li className="group relative overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={url}
-        alt={upload.file.name}
-        className="aspect-[4/3] w-full bg-slate-50 object-contain"
-      />
+      {canPreview ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={upload.file.name}
+          onError={() => setFailedUrl(url)}
+          className="aspect-[4/3] w-full bg-slate-50 object-contain"
+        />
+      ) : (
+        <div className="flex aspect-[4/3] w-full items-center justify-center bg-slate-50 px-3 text-center text-xs text-slate-500">
+          Preview unavailable
+        </div>
+      )}
       <div className="border-t border-slate-200 px-2 py-1.5">
         <p
           className="truncate text-xs font-medium text-slate-800"
