@@ -155,8 +155,8 @@ npm run dev
 
 The home page has two batch modes (toggle at the top of step 2 on the page):
 
-- **Same for all** — one ExpectedLabel form, applied to every uploaded image. Best for same-product runs.
-- **Per-label CSV** — upload a CSV mapping `filename → expected fields`. The app validates the CSV up front, matches each image to its row by filename (case-insensitive), and blocks the Analyze button if any image is unmatched. Best for multi-product importer batches.
+- **One application** — one ExpectedLabel form, applied to every uploaded image. Best for same-product runs. The UI includes a "Fill sample values" button for the Old Tom demo label.
+- **Application spreadsheet** — upload a CSV mapping `filename → expected fields`. The app validates the CSV up front, matches each image to its row by filename (case-insensitive), and blocks the Check labels button if any image is unmatched. Best for multi-product importer batches. A sample file is available in the UI and at `public/demo-batch.csv`.
 
 CSV format (header row required):
 

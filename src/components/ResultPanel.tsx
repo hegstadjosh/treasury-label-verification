@@ -28,21 +28,21 @@ export function ResultPanel({ result }: { result: LabelResult }) {
         <div className="flex items-center gap-3">
           <VerdictBadge verdict={result.verdict} size="lg" />
           <h2 className="text-lg font-semibold text-slate-900">
-            Analysis result
+            Label result
           </h2>
         </div>
       </header>
 
       {result.top_reason ? (
         <div className="border-b border-slate-200 bg-slate-50 px-5 py-3 text-sm text-slate-800">
-          <span className="font-medium text-slate-900">Top reason: </span>
+          <span className="font-medium text-slate-900">Main issue: </span>
           {result.top_reason}
         </div>
       ) : null}
 
       <div className="px-5 py-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-600">
-          Per-field audit trail
+          What the system checked
         </h3>
         <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -80,7 +80,7 @@ export function ResultPanel({ result }: { result: LabelResult }) {
           aria-expanded={evidenceOpen}
           className="flex w-full items-center justify-between px-5 py-3 text-left text-sm font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-50"
         >
-          <span>Model evidence</span>
+          <span>AI evidence</span>
           <span aria-hidden className="text-slate-500">
             {evidenceOpen ? "−" : "+"}
           </span>
@@ -88,16 +88,16 @@ export function ResultPanel({ result }: { result: LabelResult }) {
         {evidenceOpen ? (
           <div className="space-y-4 border-t border-slate-200 px-5 py-4 text-sm">
             <EvidenceBlock
-              label="Raw text the model saw"
+              label="Text found on label"
               body={extracted.raw_text}
               mono
             />
-            <EvidenceBlock label="Model notes" body={extracted.notes} />
+            <EvidenceBlock label="AI notes" body={extracted.notes} />
             {extracted.confidence &&
             Object.keys(extracted.confidence).length > 0 ? (
               <div>
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Per-field confidence
+                  AI confidence by field
                 </div>
                 <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2">
                   {(Object.entries(extracted.confidence) as [

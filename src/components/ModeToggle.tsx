@@ -5,13 +5,13 @@ import type { MatchMode } from "@/hooks/useBatchAnalysis";
 const OPTIONS: Array<{ value: MatchMode; label: string; sub: string }> = [
   {
     value: "shared",
-    label: "Same for all",
-    sub: "One product, many photos",
+    label: "One application",
+    sub: "Same facts for every image",
   },
   {
     value: "per-file",
-    label: "Per-label CSV",
-    sub: "Multiple applications, each with its own fields",
+    label: "Application spreadsheet",
+    sub: "Different facts by filename",
   },
 ];
 

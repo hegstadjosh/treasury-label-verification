@@ -29,11 +29,11 @@ export function BatchActionBar({
           type="button"
           onClick={onAnalyze}
           disabled={!canAnalyze}
-          className="inline-flex items-center justify-center rounded-md bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="inline-flex min-h-12 items-center justify-center rounded-md bg-blue-700 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           {busy ? <Spinner /> : null}
           <span className={busy ? "ml-2" : ""}>
-            {busy ? "Analyzing..." : "Analyze batch"}
+            {busy ? "Checking labels..." : "Check labels"}
           </span>
         </button>
       </div>

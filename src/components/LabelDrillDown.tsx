@@ -50,7 +50,7 @@ export function LabelDrillDown({
         <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Label details
+              Review label
             </p>
             <h2
               className="truncate text-base font-semibold text-slate-900"
@@ -64,7 +64,7 @@ export function LabelDrillDown({
             onClick={onClose}
             className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
           >
-            ← Back to queue
+            Back to queue
           </button>
         </header>
 

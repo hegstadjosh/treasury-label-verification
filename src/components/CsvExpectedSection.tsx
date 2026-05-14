@@ -18,12 +18,20 @@ export function CsvExpectedSection({
   return (
     <>
       <p className="mt-3 text-sm text-slate-600">
-        Upload a CSV with one row per label. Required columns:{" "}
+        Upload a spreadsheet saved as CSV. Each row must use the same filename
+        as its label image. Required columns:{" "}
         <CsvCode>filename</CsvCode>, <CsvCode>brand_name</CsvCode>,{" "}
         <CsvCode>class_type</CsvCode>, <CsvCode>alcohol_content</CsvCode>,{" "}
         <CsvCode>net_contents</CsvCode>. Optional:{" "}
         <CsvCode>government_warning_required</CsvCode>.
       </p>
+      <a
+        href="/demo-batch.csv"
+        download
+        className="mt-3 inline-flex rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
+      >
+        Download sample spreadsheet
+      </a>
       <CsvFileInput
         csvFilename={csvFilename}
         disabled={disabled}
@@ -58,7 +66,7 @@ function CsvFileInput({
           (disabled ? "cursor-not-allowed opacity-50" : "")
         }
       >
-        {csvFilename ? "Replace CSV" : "Choose CSV file"}
+        {csvFilename ? "Replace spreadsheet" : "Choose spreadsheet"}
         <input
           type="file"
           accept=".csv,text/csv"
@@ -99,7 +107,7 @@ function CsvPreview({ csvParsed }: { csvParsed: CsvParseResult | null }) {
   if (!csvParsed.ok) {
     return (
       <div role="alert" className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
-        <span className="font-medium">CSV error. </span>
+        <span className="font-medium">Spreadsheet error. </span>
         {csvParsed.error}
       </div>
     );

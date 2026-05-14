@@ -61,9 +61,9 @@ export function getStatusMessage(opts: {
   busy: boolean;
 }): string {
   if (opts.status.kind === "loading") {
-    return `Analyzed ${opts.status.processed} of ${opts.status.total} labels...`;
+    return `Checked ${opts.status.processed} of ${opts.status.total} labels...`;
   }
-  if (opts.busy) return `Analyzing ${opts.files.length} labels...`;
+  if (opts.busy) return `Checking ${opts.files.length} labels...`;
   if (opts.files.length === 0) return "Add at least one image to begin.";
   if (opts.matchMode === "shared" && !hasAnyExpected(opts.expected)) {
     return "Enter at least one declared field to enable analysis.";
@@ -71,7 +71,7 @@ export function getStatusMessage(opts: {
   if (opts.matchMode === "per-file") {
     return perFileStatus(opts.csvParsed, opts.matchStatus);
   }
-  return `Ready to analyze ${opts.files.length} label${opts.files.length === 1 ? "" : "s"}.`;
+  return `Ready to check ${opts.files.length} label${opts.files.length === 1 ? "" : "s"}.`;
 }
 
 function hasAnyExpected(expected: ExpectedLabel): boolean {
@@ -87,9 +87,9 @@ function perFileStatus(
   csvParsed: CsvParseResult | null,
   matchStatus: MatchStatus,
 ): string {
-  if (!csvParsed) return "Upload a CSV with per-label expected fields.";
-  if (!csvParsed.ok) return "Fix the CSV errors before analyzing.";
+  if (!csvParsed) return "Upload the application spreadsheet.";
+  if (!csvParsed.ok) return "Fix the spreadsheet errors before checking labels.";
   const unmatched = matchStatus?.unmatched.length ?? 0;
   if (unmatched > 0) return `${unmatched} image${unmatched === 1 ? " has" : "s have"} no matching CSV row.`;
-  return "Ready to analyze matched labels.";
+  return "Ready to check matched labels.";
 }

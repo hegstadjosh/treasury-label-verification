@@ -8,6 +8,7 @@ export type VerdictFilter = LabelVerdict | null;
 interface TileSpec {
   verdict: LabelVerdict;
   label: string;
+  helper: string;
   count: number;
   /** Tailwind classes for the tile face when NOT active. */
   base: string;
@@ -30,6 +31,7 @@ export function OverviewTiles({
     {
       verdict: "Pass",
       label: "Pass",
+      helper: "No action",
       count: summary.pass,
       base: "border-emerald-200 bg-emerald-50 hover:border-emerald-400",
       active: "border-emerald-500 bg-emerald-100 ring-2 ring-emerald-300",
@@ -38,6 +40,7 @@ export function OverviewTiles({
     {
       verdict: "Needs Review",
       label: "Needs Review",
+      helper: "Check first",
       count: summary.needs_review,
       base: "border-amber-200 bg-amber-50 hover:border-amber-400",
       active: "border-amber-500 bg-amber-100 ring-2 ring-amber-300",
@@ -46,6 +49,7 @@ export function OverviewTiles({
     {
       verdict: "Fail",
       label: "Fail",
+      helper: "Likely reject",
       count: summary.fail,
       base: "border-rose-200 bg-rose-50 hover:border-rose-400",
       active: "border-rose-500 bg-rose-100 ring-2 ring-rose-300",
@@ -54,6 +58,7 @@ export function OverviewTiles({
     {
       verdict: "Unreadable",
       label: "Unreadable",
+      helper: "Need better image",
       count: summary.unreadable,
       base: "border-slate-200 bg-slate-50 hover:border-slate-400",
       active: "border-slate-500 bg-slate-100 ring-2 ring-slate-300",
@@ -84,7 +89,7 @@ export function OverviewTiles({
               {tile.count}
             </span>
             <span className="text-xs text-slate-500">
-              of {summary.total} total
+              {tile.helper}
             </span>
           </button>
         );

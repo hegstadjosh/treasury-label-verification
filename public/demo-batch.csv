@@ -1,0 +1,6 @@
+filename,brand_name,class_type,alcohol_content,net_contents,government_warning_required
+ok.png,Old Tom Distillery,Straight Bourbon Whiskey,45% ABV,750 mL,true
+abv-mismatch.png,Old Tom Distillery,Straight Bourbon Whiskey,45% ABV,750 mL,true
+missing-warning.png,Old Tom Distillery,Straight Bourbon Whiskey,45% ABV,750 mL,true
+lowercase-warning.png,Old Tom Distillery,Straight Bourbon Whiskey,45% ABV,750 mL,true
+low-quality.png,Old Tom Distillery,Straight Bourbon Whiskey,45% ABV,750 mL,true

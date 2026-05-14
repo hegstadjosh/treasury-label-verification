@@ -6,12 +6,11 @@ export function AppHeader() {
           TTB Prototype
         </p>
         <h1 className="text-2xl font-semibold text-slate-900">
-          Alcohol Label Verification - Batch Review
+          Alcohol Label Review
         </h1>
         <p className="text-sm text-slate-600">
-          Upload labels, declare the expected product facts, and review the
-          automatic verdicts. Clear cases stay handled; exceptions surface with
-          evidence.
+          Upload label images and application facts. The system checks each
+          label and puts the ones needing attention at the top.
         </p>
       </div>
     </header>

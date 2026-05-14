@@ -44,7 +44,7 @@ export function QueueTableRow({
           }}
           className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
         >
-          View details
+          Review
         </button>
       </td>
     </tr>

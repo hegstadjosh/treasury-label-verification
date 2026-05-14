@@ -72,13 +72,13 @@ export function QueueTable({
       <header className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-slate-900">
-            Review queue
+            Label queue
           </h2>
           <p className="text-xs text-slate-600">
             {labels.length === 0
               ? "No results yet."
               : filter
-                ? `${visible.length} of ${labels.length} labels — filtered to ${filter}`
+                ? `${visible.length} of ${labels.length} labels shown: ${filter}`
                 : `${visible.length} of ${labels.length} labels`}
           </p>
         </div>
@@ -86,7 +86,7 @@ export function QueueTable({
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search filename or reason…"
+          placeholder="Search filename or issue..."
           className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 sm:w-64"
         />
       </header>
@@ -105,13 +105,13 @@ export function QueueTable({
               </th>
               <th className="px-3 py-2">
                 <SortHeader
-                  label="Verdict"
+                  label="Result"
                   active={sortKey === "verdict"}
                   dir={sortDir}
                   onClick={() => toggleSort("verdict")}
                 />
               </th>
-              <th className="px-3 py-2">Top reason</th>
+              <th className="px-3 py-2">What to check</th>
               <th className="w-px px-3 py-2" />
             </tr>
           </thead>
@@ -123,7 +123,7 @@ export function QueueTable({
                   className="px-3 py-8 text-center text-sm text-slate-500"
                 >
                   {labels.length === 0
-                    ? "Upload labels and click Analyze to populate the queue."
+                    ? "Upload labels and click Check labels to populate the queue."
                     : "No labels match this filter."}
                 </td>
               </tr>

@@ -72,6 +72,14 @@ function ResultsArea({ batch }: { batch: ReturnType<typeof useBatchAnalysis> }) 
   if (batch.hasResults) {
     return (
       <div className="mt-8 space-y-4">
+        <section>
+          <h2 className="text-base font-semibold text-slate-900">
+            3. Review the results
+          </h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Problems and uncertain labels are sorted first. Click any row to see exactly what was checked.
+          </p>
+        </section>
         <OverviewTiles
           summary={batch.response.summary}
           filter={batch.filter}
@@ -91,7 +99,7 @@ function ResultsArea({ batch }: { batch: ReturnType<typeof useBatchAnalysis> }) 
 
   return (
     <div className="mt-8 rounded-lg border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm text-slate-500">
-      Upload labels and analyze the batch to populate the review queue.
+      Results will appear here after the labels are checked.
     </div>
   );
 }
