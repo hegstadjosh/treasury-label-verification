@@ -1,5 +1,5 @@
 import type { ExtractInput, VisionExtractor } from "./vision";
-import type { ComplianceField, ExtractedLabel } from "./types";
+import type { ComplianceField, ExtractedLabel, SourceBox } from "./types";
 
 export class GeminiVisionExtractor implements VisionExtractor {
   private apiKey: string;
@@ -105,6 +105,7 @@ function parseGeminiLabel(raw: string): ExtractedLabel {
     raw_text: str(o.raw_text),
     notes: str(o.notes),
     confidence: parseConfidence(o.confidence),
+    source_boxes: parseSourceBoxes(o.source_boxes),
   };
 }
 
@@ -120,6 +121,8 @@ const CONFIDENCE_FIELDS = [
   "government_warning",
 ] as const satisfies readonly ComplianceField[];
 
+const COMPLIANCE_FIELDS = new Set<ComplianceField>(CONFIDENCE_FIELDS);
+
 function parseConfidence(value: unknown): ExtractedLabel["confidence"] | undefined {
   if (!value || typeof value !== "object") return undefined;
   const out: Partial<Record<ComplianceField, number>> = {};
@@ -133,6 +136,56 @@ function parseConfidence(value: unknown): ExtractedLabel["confidence"] | undefin
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function parseSourceBoxes(value: unknown): SourceBox[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const boxes: SourceBox[] = [];
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const field = record.field;
+    const box = parseBox(record.box_2d ?? record.box2d);
+
+    if (
+      typeof field !== "string" ||
+      !COMPLIANCE_FIELDS.has(field as ComplianceField) ||
+      !box
+    ) {
+      continue;
+    }
+
+    boxes.push({
+      field: field as ComplianceField,
+      label: str(record.label),
+      box_2d: box,
+    });
+  }
+
+  return boxes.length > 0 ? boxes : undefined;
+}
+
+function parseBox(value: unknown): SourceBox["box_2d"] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const nums = value.map((v) =>
+    typeof v === "number" && Number.isFinite(v) ? v : null,
+  );
+  if (nums.some((v) => v == null)) return null;
+
+  const [yMin, xMin, yMax, xMax] = nums as [number, number, number, number];
+  if (yMax <= yMin || xMax <= xMin) return null;
+
+  return [
+    clampBoxValue(yMin),
+    clampBoxValue(xMin),
+    clampBoxValue(yMax),
+    clampBoxValue(xMax),
+  ];
+}
+
+function clampBoxValue(value: number): number {
+  return Math.max(0, Math.min(1000, value));
+}
+
 interface GeminiResponse {
   candidates?: Array<{
     content?: {
@@ -143,7 +196,7 @@ interface GeminiResponse {
 
 const EXTRACTION_PROMPT = `You are reading an alcohol beverage label submitted to the US Treasury Department's Alcohol and Tobacco Tax and Trade Bureau (TTB).
 
-Extract the following fields exactly as they appear on the label, preserving capitalization, punctuation, and wording:
+Extract the following fields exactly as they appear on the label, preserving capitalization, punctuation, and wording. Always include every core field key; use an empty string only when that field is not visible on the label:
 - brand_name: the brand or producer name shown most prominently on the label
 - class_type: the class/type designation
 - alcohol_content: the alcohol-by-volume statement
@@ -152,6 +205,12 @@ Extract the following fields exactly as they appear on the label, preserving cap
 - raw_text: every readable piece of text on the label, in roughly top-to-bottom reading order.
 - notes: ONE short sentence about image-quality issues. If the image is clean, omit this field.
 - confidence: object with 0.0-1.0 confidence scores for brand_name, class_type, alcohol_content, net_contents, government_warning.
+- source_boxes: array of visual evidence boxes for the extracted fields when visible. Each item must include:
+  - field: one of brand_name, class_type, alcohol_content, net_contents, government_warning
+  - label: short display label
+  - box_2d: normalized [y_min, x_min, y_max, x_max] coordinates from 0 to 1000.
+
+Do not leave alcohol_content or government_warning empty if the text is readable in raw_text.
 
 Return JSON only.`;
 
@@ -175,6 +234,28 @@ const GEMINI_RESPONSE_SCHEMA = {
         government_warning: { type: "number" },
       },
     },
+    source_boxes: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          field: { type: "string" },
+          label: { type: "string" },
+          box_2d: {
+            type: "array",
+            items: { type: "number" },
+          },
+        },
+        required: ["field", "box_2d"],
+      },
+    },
   },
-  required: ["raw_text"],
+  required: [
+    "brand_name",
+    "class_type",
+    "alcohol_content",
+    "net_contents",
+    "government_warning",
+    "raw_text",
+  ],
 };

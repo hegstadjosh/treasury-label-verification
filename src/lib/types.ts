@@ -54,6 +54,14 @@ export interface ExtractedLabel {
   notes?: string;
   /** Per-field confidence 0..1 if the model reported one. */
   confidence?: Partial<Record<ComplianceField, number>>;
+  /** Optional normalized 0..1000 evidence boxes, [y_min, x_min, y_max, x_max]. */
+  source_boxes?: SourceBox[];
+}
+
+export interface SourceBox {
+  field: ComplianceField;
+  label?: string;
+  box_2d: [number, number, number, number];
 }
 
 /** One row of the audit trail. */

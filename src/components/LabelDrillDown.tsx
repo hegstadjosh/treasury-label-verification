@@ -2,16 +2,26 @@
 
 import { useEffect, useState } from "react";
 import { useImageDataUrl } from "@/hooks/useImageDataUrl";
-import type { BatchLabelEntry } from "@/lib/types";
+import type { BatchLabelEntry, SourceBox } from "@/lib/types";
 import { ResultPanel } from "./ResultPanel";
+
+const BOX_LABELS = {
+  brand_name: "Brand",
+  class_type: "Class",
+  alcohol_content: "ABV",
+  net_contents: "Net",
+  government_warning: "Warning",
+} as const;
 
 export function LabelDrillDown({
   entry,
   imageFile,
+  sourceBoxes,
   onClose,
 }: {
   entry: BatchLabelEntry | null;
   imageFile: File | null;
+  sourceBoxes?: SourceBox[];
   onClose: () => void;
 }) {
   const open = entry !== null;
@@ -76,6 +86,7 @@ export function LabelDrillDown({
           <LabelImagePreview
             imageUrl={imageUrl}
             filename={entry.filename}
+            sourceBoxes={sourceBoxes ?? []}
           />
           <ResultPanel result={entry.result} />
         </div>
@@ -87,9 +98,11 @@ export function LabelDrillDown({
 function LabelImagePreview({
   imageUrl,
   filename,
+  sourceBoxes,
 }: {
   imageUrl: string | null;
   filename: string;
+  sourceBoxes: SourceBox[];
 }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const canPreview = imageUrl && failedUrl !== imageUrl;
@@ -104,13 +117,18 @@ function LabelImagePreview({
       <div className="bg-slate-100 p-3">
         {canPreview ? (
           <div className="flex justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imageUrl}
-              alt={`Uploaded label ${filename}`}
-              onError={() => setFailedUrl(imageUrl)}
-              className="block max-h-[24rem] max-w-full rounded border border-slate-200 bg-white"
-            />
+            <div className="relative inline-block max-w-full">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imageUrl}
+                alt={`Uploaded label ${filename}`}
+                onError={() => setFailedUrl(imageUrl)}
+                className="block max-h-[24rem] max-w-full rounded border border-slate-200 bg-white"
+              />
+              {sourceBoxes.map((box, index) => (
+                <SourceBoxOverlay key={`${box.field}-${index}`} box={box} />
+              ))}
+            </div>
           </div>
         ) : (
           <div className="rounded border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500">
@@ -118,6 +136,32 @@ function LabelImagePreview({
           </div>
         )}
       </div>
+      {sourceBoxes.length > 0 ? (
+        <p className="border-t border-slate-200 px-5 py-2 text-xs text-slate-500">
+          Red boxes show where the AI found each extracted field.
+        </p>
+      ) : null}
     </section>
+  );
+}
+
+function SourceBoxOverlay({ box }: { box: SourceBox }) {
+  const [yMin, xMin, yMax, xMax] = box.box_2d;
+
+  return (
+    <div
+      className="pointer-events-none absolute rounded-sm border-2 border-red-500 bg-red-500/10"
+      style={{
+        top: `${yMin / 10}%`,
+        left: `${xMin / 10}%`,
+        height: `${(yMax - yMin) / 10}%`,
+        width: `${(xMax - xMin) / 10}%`,
+      }}
+      title={box.label ?? BOX_LABELS[box.field]}
+    >
+      <span className="absolute -top-5 left-0 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm">
+        {box.label || BOX_LABELS[box.field]}
+      </span>
+    </div>
   );
 }

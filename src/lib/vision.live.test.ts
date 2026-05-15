@@ -50,6 +50,7 @@ describe.runIf(LIVE)("GeminiVisionExtractor (live smoke)", () => {
       expect(out.net_contents?.toLowerCase()).toContain("750");
       expect(out.government_warning).toMatch(/^GOVERNMENT WARNING:/);
       expect(out.raw_text?.length ?? 0).toBeGreaterThan(50);
+      expect(out.source_boxes?.length ?? 0).toBeGreaterThan(0);
     },
   );
 

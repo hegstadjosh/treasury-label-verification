@@ -18,7 +18,7 @@ The deployed app uses Gemini vision extraction. Local development uses a determi
 - Extract visible label text with a vision model.
 - Compare extracted values against expected fields.
 - Sort labels into an exception-first review queue.
-- Show per-field expected value, extracted value, verdict, reason, model text, confidence, and image-quality notes.
+- Show per-field expected value, extracted value, verdict, reason, model text, confidence, image-quality notes, and AI field boxes on the label image when available.
 
 ## How The AI Works
 
@@ -31,6 +31,7 @@ Gemini reads the label image and returns structured data:
 - government warning text
 - raw visible text
 - confidence scores
+- source boxes for visible fields
 - image-quality notes
 
 Application code then applies the compliance rules and produces the prototype verdict. This keeps the AI useful for OCR/vision while keeping the rule-sensitive judgment auditable and testable.
@@ -156,4 +157,3 @@ These are intentional prototype trade-offs. The prompt asked for a standalone pr
 - Store uploaded images in object storage.
 - Add image preprocessing for latency.
 - Calibrate confidence thresholds with real reviewer feedback.
-
