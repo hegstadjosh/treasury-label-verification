@@ -27,7 +27,16 @@ export function getExtractor(): VisionExtractor {
   const useReal = process.env.USE_REAL_VISION === "1";
   const apiKey = process.env.GEMINI_API_KEY;
   if (useReal && apiKey) {
-    return new GeminiVisionExtractor({ apiKey });
+    return new GeminiVisionExtractor({
+      apiKey,
+      timeoutMs: parsePositiveInt(process.env.VISION_TIMEOUT_MS) ?? 60_000,
+    });
   }
   return new StubExtractor();
+}
+
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }

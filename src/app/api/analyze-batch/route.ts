@@ -46,7 +46,7 @@ import type {
  * inside Gemini's per-project QPS and Vercel serverless event-loop budget while
  * still hiding most per-label latency behind parallelism. Tune here.
  */
-export const BATCH_CONCURRENCY = 8;
+export const BATCH_CONCURRENCY = 4;
 
 const ExpectedLabelSchema = z.object({
   brand_name: z.string(),
@@ -196,9 +196,14 @@ export async function POST(request: Request): Promise<Response> {
           filename: image.name,
         });
         result = classifyLabel(expected, extracted);
-      } catch {
+      } catch (err) {
         // Per-image extractor failure → Unreadable, NOT 500. Mirrors the
         // single-label route's contract so batch and single behave the same.
+        console.warn(
+          `Extractor failed for ${image.name}: ${
+            err instanceof Error ? err.message : "unknown error"
+          }`,
+        );
         result = classifyLabel(expected, {}, { unreadable: true });
       }
       return {

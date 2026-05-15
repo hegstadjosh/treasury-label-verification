@@ -15,7 +15,7 @@ export class GeminiVisionExtractor implements VisionExtractor {
   }) {
     this.apiKey = opts.apiKey;
     this.model = opts.model ?? "gemini-3.1-flash-lite";
-    this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.timeoutMs = opts.timeoutMs ?? 60_000;
     this.endpoint =
       opts.endpoint ??
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;

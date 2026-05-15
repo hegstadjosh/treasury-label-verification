@@ -24,13 +24,10 @@ interface AnalyzeChunksOptions {
  * Cap on how many client-side chunk requests are in flight at once.
  *
  * Each chunk maps to one POST to /api/analyze-batch, which itself fans out
- * up to BATCH_CONCURRENCY (8) extractor calls. So the maximum live
- * extractor calls = CLIENT_PARALLELISM × server cap. For 25 labels this
- * means ~32 concurrent Gemini calls — well within per-project QPS, but if
- * batches scale to 100+ labels we'd want to lower this or add a token
- * bucket. For prototype loads, parallel is just faster.
+ * extractor calls. Keep this low because visual field boxes make each Gemini
+ * call slower; too much parallelism creates avoidable timeout noise.
  */
-const CLIENT_PARALLELISM = 4;
+const CLIENT_PARALLELISM = 2;
 
 /**
  * Fire all chunks in parallel (bounded by CLIENT_PARALLELISM), surface
